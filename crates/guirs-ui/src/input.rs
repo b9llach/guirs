@@ -1353,6 +1353,44 @@ mod tests {
     }
 
     #[test]
+    fn a_submenu_is_hit_before_the_menu_that_opened_it() {
+        // Two overlays where one is inside the other, overlapping. A menu and
+        // the submenu it opened: a click in the overlap belongs to the submenu,
+        // because that is the thing on top.
+        let picked = Model::new(String::new());
+        let menu = picked.clone();
+        let submenu = picked.clone();
+
+        let mut harness = Harness::new();
+        harness.frame(
+            div()
+                .size_full()
+                .child(
+                    div()
+                        .overlay()
+                        .absolute()
+                        .top(px_(0.0))
+                        .left(px_(0.0))
+                        .size(px_(200.0))
+                        .on_click(move |_, _| menu.set("menu".into()))
+                        .child(
+                            div()
+                                .overlay()
+                                .absolute()
+                                .top(px_(0.0))
+                                .left(px_(0.0))
+                                .size(px_(100.0))
+                                .on_click(move |_, _| submenu.set("submenu".into())),
+                        ),
+                )
+                .into_any(),
+        );
+
+        harness.click(50.0, 50.0);
+        assert_eq!(picked.get(), "submenu");
+    }
+
+    #[test]
     fn an_overlay_is_hit_before_what_it_covers() {
         let picked = Model::new(String::new());
         let under = picked.clone();

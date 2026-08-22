@@ -219,6 +219,18 @@ impl Scene {
     /// An overlay escapes both the painting order and the clip of whatever
     /// contains it, which is what a dropdown or a tooltip needs: it is a child
     /// in the tree but it belongs on top of the window.
+    /// Begin an overlay one level above whatever is already open.
+    ///
+    /// The depth is counted here rather than chosen by the caller, so a menu
+    /// does not have to know whether it was opened from the window or from
+    /// another menu. A submenu lands above its parent by construction.
+    pub fn push_overlay(&mut self) {
+        // Saturating, so a pathologically deep tree stops climbing rather than
+        // wrapping around and drawing underneath everything.
+        let depth = (self.parked_clips.len() as u8).saturating_add(1);
+        self.push_layer(depth);
+    }
+
     pub fn push_layer(&mut self, layer: u8) {
         self.parked_clips.push(std::mem::take(&mut self.clips));
         self.layer = self.layer.max(layer);
@@ -791,6 +803,32 @@ mod tests {
         scene.pop_clip();
         assert_eq!(scene.stats().quads, 1);
         assert_eq!(scene.stats().culled, 0);
+    }
+
+    #[test]
+    fn an_overlay_inside_an_overlay_draws_above_the_one_it_opened_from() {
+        // A submenu. It is painted inside the menu that opened it, and it has
+        // to land on top of that menu rather than behind it, whatever else the
+        // menu drew afterwards.
+        let mut scene = Scene::new();
+        scene.push_quad(filled(0.0, 0.0, 10.0, 10.0)); // the window
+
+        scene.push_layer(1); // the menu
+        scene.push_quad(filled(20.0, 20.0, 100.0, 200.0));
+        scene.push_layer(2); // the submenu it opened
+        scene.push_quad(filled(110.0, 60.0, 100.0, 120.0));
+        scene.pop_layer();
+        // The menu keeps drawing after its submenu opened, and this must not
+        // end up over the submenu.
+        scene.push_quad(filled(20.0, 220.0, 100.0, 20.0));
+        scene.pop_layer();
+
+        let layers: Vec<u8> = scene.ordered_batches().iter().map(|b| b.layer).collect();
+        assert!(
+            layers.windows(2).all(|pair| pair[0] <= pair[1]),
+            "batches are not in layer order: {layers:?}"
+        );
+        assert_eq!(layers.last().copied(), Some(2), "the submenu is not on top");
     }
 
     #[test]

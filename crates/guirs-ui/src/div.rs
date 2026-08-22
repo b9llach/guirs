@@ -522,7 +522,7 @@ impl Element for Div {
         }
 
         if self.overlay {
-            cx.scene.push_layer(1);
+            cx.scene.push_overlay();
         }
 
         // A transform applies to everything this element draws, its own

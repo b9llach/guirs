@@ -851,8 +851,6 @@ one that does less:
 - **Grid layout.** Flexbox and block only. `taffy` supports grid, so this is
   mostly a matter of parsing the template properties.
 - **Dashed and dotted borders.** They parse and round trip, but render solid.
-- **Nested overlays.** There is one overlay layer, which is enough for dropdowns
-  and tooltips. A menu opening from inside another menu would need a stack.
 - **Group opacity.** `opacity` multiplies down the tree per element rather than
   compositing the subtree once, so overlapping translucent children show through
   each other.
