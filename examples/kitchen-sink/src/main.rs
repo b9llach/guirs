@@ -237,6 +237,7 @@ fn sidebar(state: &State, fps: f32) -> Div {
         .children(NAV.iter().enumerate().map(|(index, name)| {
             let nav = state.nav.clone();
             list_item(index == selected)
+                .tooltip(format!("Go to {name}"))
                 .child(text(*name).whitespace_nowrap())
                 .on_click(move |_, _| nav.set(index))
         }))
@@ -397,6 +398,7 @@ fn reorderable(state: &State) -> Div {
                     });
                     cx.request_redraw();
                 })
+                .tooltip(format!("Drag to move {label}"))
                 .child(text("\u{2261}").class("reorder-grip").decorative())
                 .child(text(label.clone()).whitespace_nowrap()),
         );

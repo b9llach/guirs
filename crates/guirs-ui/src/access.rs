@@ -132,6 +132,9 @@ pub struct AccessNode {
     pub value: Option<SharedString>,
     /// The text of a label, which is also where a container gets its name.
     pub text: Option<SharedString>,
+    /// Something further about this, beyond what it is called. What a tooltip
+    /// says, said without the pointer being involved.
+    pub description: Option<SharedString>,
     /// The key that runs this, for a reader to offer alongside the name.
     pub shortcut: Option<SharedString>,
     pub focusable: bool,
@@ -159,6 +162,7 @@ impl AccessNode {
             label: None,
             value: None,
             text: None,
+            description: None,
             shortcut: None,
             focusable: false,
             clickable: false,

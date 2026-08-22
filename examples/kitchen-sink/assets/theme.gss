@@ -622,3 +622,18 @@ textarea:focus { border-color: var(--primary); }
     padding: 7px 10px;
     border-right: 1px solid var(--border);
 }
+
+/* --------------------------------------------------------------------------
+   Tooltip
+   -------------------------------------------------------------------------- */
+
+tooltip {
+    background: var(--overlay);
+    border: 1px solid var(--border-high);
+    border-radius: 6px;
+    padding: 5px 9px;
+    margin-top: 6px;
+    color: var(--text);
+    font-size: 12px;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+}

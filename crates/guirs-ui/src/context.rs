@@ -391,6 +391,12 @@ pub struct InputState {
     /// button is its label. `button:active` still has to match, so the whole
     /// chain counts as active, exactly as hover does.
     pub active: SmallVec<[GlobalElementId; 8]>,
+    /// Which element the pointer has been resting on, and since when.
+    ///
+    /// One at a time, because only one tooltip is ever shown. Reset whenever
+    /// the pointer moves to something else, so a tooltip that has not yet
+    /// appeared does not appear over the wrong thing.
+    pub resting: Option<(GlobalElementId, f64)>,
     /// What is being carried, and where it would land.
     ///
     /// Held here with hover and focus because it is the same kind of thing:

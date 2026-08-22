@@ -54,6 +54,8 @@ pub struct Div {
     /// Named so a keymap can say "only here". Claimed by everything painted
     /// inside this element, not only by the element itself.
     key_context: Option<SharedString>,
+    /// What to say about this after the pointer has rested on it.
+    tooltip: Option<SharedString>,
     stick_to_bottom: bool,
     on_dismiss: Option<DismissHandler>,
     virtual_rows: Option<VirtualRows>,
@@ -95,6 +97,7 @@ impl Div {
             extra_state: StateFlags::EMPTY,
             overlay: false,
             key_context: None,
+            tooltip: None,
             stick_to_bottom: false,
             on_dismiss: None,
             virtual_rows: None,
@@ -184,6 +187,24 @@ impl Div {
     /// parent's scroll viewport.
     pub fn overlay(mut self) -> Self {
         self.overlay = true;
+        self
+    }
+
+    /// Say something about this once the pointer has rested on it.
+    ///
+    /// Appears after a pause rather than immediately, so moving across a row
+    /// of controls does not flash a tooltip on each one, and goes away as soon
+    /// as the pointer moves on or anything is pressed.
+    ///
+    /// The text is also the element's description, so it reaches a screen
+    /// reader without the pointer being involved at all.
+    ///
+    /// ```
+    /// # use guirs_ui::div::div;
+    /// div().tooltip("Delete this file");
+    /// ```
+    pub fn tooltip(mut self, text: impl Into<SharedString>) -> Self {
+        self.tooltip = Some(text.into());
         self
     }
 
@@ -572,6 +593,53 @@ impl Styled for Div {
     }
 }
 
+/// How long the pointer has to rest before a tooltip appears, in seconds.
+///
+/// Long enough that crossing a row of controls shows nothing, short enough
+/// that somebody who has stopped to read is not left waiting.
+pub const TOOLTIP_DELAY: f64 = 0.6;
+
+impl Div {
+    /// Add the tooltip as a child, once the pointer has asked for one.
+    ///
+    /// Placed after everything else so it draws over its own element, and as
+    /// an overlay so it escapes whatever the element is clipped to.
+    fn materialize_tooltip(&mut self, cx: &mut Cx) {
+        let Some(text) = self.tooltip.clone() else {
+            return;
+        };
+        let Some((resting, since)) = cx.input.resting else {
+            return;
+        };
+        // The pointer rests on the innermost element under it, which for a
+        // button is usually its label, so an element counts as rested on when
+        // anything inside it is.
+        if resting != self.global_id && !cx.input.hovered.contains(&self.global_id) {
+            return;
+        }
+
+        let waited = cx.now - since;
+        if waited < TOOLTIP_DELAY {
+            // A frame is owed at the moment it would appear, or it never
+            // appears until the pointer happens to move again.
+            cx.request_redraw_in(TOOLTIP_DELAY - waited);
+            return;
+        }
+
+        self.children.push(
+            Div::new("tooltip")
+                .overlay()
+                .absolute()
+                .top(guirs_core::Length::Percent(1.0))
+                .left(Px(0.0))
+                // Whatever it says, it must not stretch its own element.
+                .pointer_events_none()
+                .child(crate::text::text(text).whitespace_nowrap())
+                .into_any(),
+        );
+    }
+}
+
 impl Element for Div {
     fn request_layout(&mut self, cx: &mut Cx) -> LayoutId {
         self.global_id = cx.begin_element(
@@ -586,6 +654,9 @@ impl Element for Div {
         // Before the child count is fixed, because a virtualized container
         // decides how many children it has by looking at where the reader is.
         self.materialize_virtual_rows(cx);
+        // Added as a real child rather than drawn by hand, so it is laid out,
+        // styled and clipped like everything else.
+        self.materialize_tooltip(cx);
 
         cx.push_style(self.computed.clone());
         cx.enter_children(self.children.len());
@@ -655,6 +726,9 @@ impl Element for Div {
                 node.label = self.access_label.clone();
                 node.value = self.access_value.clone();
                 node.shortcut = self.access_shortcut.clone();
+                // What a tooltip says is worth saying to somebody who will
+                // never rest a pointer on anything.
+                node.description = self.tooltip.clone();
                 node.checked = self.access_checked;
                 node.numeric = self.access_numeric;
                 node.focusable = self.focusable;

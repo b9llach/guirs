@@ -667,6 +667,22 @@ closes an open branch, and on something already closed steps out to whatever
 contains it, which is the nearest row above that is one level shallower rather
 than simply the row above.
 
+## Tooltips
+
+```rust
+div().tooltip("Delete this file")
+```
+
+Appears after the pointer has rested, so moving across a row of controls does
+not flash one on each; goes away as soon as the pointer moves on or anything is
+pressed. It is a real element in an overlay rather than something drawn by
+hand, so it is styled from the stylesheet like everything else and escapes
+whatever its own element is clipped to.
+
+The same text becomes the element's accessible description. Somebody using a
+screen reader never rests a pointer on anything, so a tooltip that only ever
+appeared on hover would say nothing to them at all.
+
 ## Tables
 
 ```rust

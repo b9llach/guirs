@@ -212,6 +212,17 @@ impl InputRouter {
                         cx.input.hovered = hovered;
                         out.redraw = true;
                     }
+                    // The pointer moved, so whatever it was resting on it is
+                    // no longer resting on. Restarted rather than kept, or a
+                    // tooltip would appear over something the pointer has
+                    // merely passed across.
+                    let innermost = cx.chain_at(mouse.position).first().map(|r| r.id);
+                    let now = cx.now;
+                    match (&mut cx.input.resting, innermost) {
+                        (Some((id, _)), Some(under)) if *id == under => {}
+                        (_, Some(under)) => cx.input.resting = Some((under, now)),
+                        (_, None) => cx.input.resting = None,
+                    }
                     self.cursor = cursor_for(cx, mouse.position);
                     let chain = cx.chain_at(mouse.position);
                     dispatch(cx, &chain, mouse, Phase::Move, &mut out);
@@ -226,6 +237,9 @@ impl InputRouter {
                 }
                 cx.input.modifiers = mouse.modifiers;
                 cx.input.mouse_position = mouse.position;
+                // Pressing anything puts a tooltip away: it has been read, or
+                // it is in the way of whatever is being done now.
+                cx.input.resting = None;
                 out.redraw = true;
 
                 // Anything open that this press did not land inside gets closed
@@ -382,6 +396,7 @@ impl InputRouter {
                 cx.input.mouse_inside = false;
                 if !cx.input.hovered.is_empty() {
                     cx.input.hovered.clear();
+                    cx.input.resting = None;
                     out.redraw = true;
                 }
                 // A press in progress keeps its capture: leaving the window
@@ -1023,8 +1038,13 @@ mod tests {
             }
         }
 
-        fn frame(&mut self, mut root: AnyElement) {
-            self.cx.begin_frame(self.size, ScaleFactor(1.0), 0.0);
+        fn frame(&mut self, root: AnyElement) {
+            self.frame_at(0.0, root);
+        }
+
+        /// A frame at a particular moment, for anything that waits.
+        fn frame_at(&mut self, now: f64, mut root: AnyElement) {
+            self.cx.begin_frame(self.size, ScaleFactor(1.0), now);
             let node = root.request_layout(&mut self.cx);
             self.cx.layout.compute(node, self.size, &mut self.cx.text);
             let bounds = self.cx.layout.bounds(node);
@@ -1525,6 +1545,130 @@ mod tests {
         // Well inside it: a sort.
         harness.click(80.0, 10.0);
         assert!(state.read().sort().is_some(), "the heading stopped sorting");
+    }
+
+    /// Whether a frame drew a tooltip saying `text`.
+    fn shows_tooltip(harness: &Harness, text: &str) -> bool {
+        harness
+            .cx
+            .access
+            .nodes
+            .iter()
+            .any(|node| node.text.as_deref() == Some(text))
+    }
+
+    #[test]
+    fn a_tooltip_is_also_said_to_a_reader_without_waiting() {
+        // Somebody using a screen reader never rests a pointer on anything,
+        // so a tooltip that only ever appeared on hover would say nothing to
+        // them at all.
+        let tree = described(
+            div()
+                .size_full()
+                .child(
+                    crate::div::Div::new("button")
+                        .label("Delete")
+                        .tooltip("Delete this file")
+                        .child(text("Delete")),
+                )
+                .into_any(),
+        );
+        let node = named(&tree, "Delete").expect("the control lost its name");
+        assert_eq!(node.description.as_deref(), Some("Delete this file"));
+    }
+
+    #[test]
+    fn a_tooltip_waits_before_it_appears() {
+        // Moving across a row of controls must not flash a tooltip on each
+        // one, so nothing is shown until the pointer has stopped.
+        let mut harness = Harness::new();
+        harness.cx.access.active = true;
+
+        let build = || {
+            div()
+                .size_full()
+                .child(div().size(px_(80.0)).tooltip("Delete this file"))
+                .into_any()
+        };
+
+        harness.frame(build());
+        harness.drag_to(40.0, 40.0);
+
+        harness.frame_at(0.1, build());
+        assert!(
+            !shows_tooltip(&harness, "Delete this file"),
+            "it appeared straight away"
+        );
+
+        // And a frame is owed at the moment it would appear, or it never
+        // appears until the pointer happens to move again.
+        assert!(
+            harness.cx.redraw_at.is_some(),
+            "nothing asked to be drawn again, so it would never appear"
+        );
+
+        harness.frame_at(1.0, build());
+        assert!(shows_tooltip(&harness, "Delete this file"), "it never appeared");
+    }
+
+    #[test]
+    fn moving_on_takes_a_tooltip_away() {
+        let mut harness = Harness::new();
+        harness.cx.access.active = true;
+
+        let build = || {
+            div()
+                .size_full()
+                .child(
+                    div()
+                        .absolute()
+                        .left(px_(0.0))
+                        .top(px_(0.0))
+                        .size(px_(80.0))
+                        .tooltip("First"),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .left(px_(200.0))
+                        .top(px_(0.0))
+                        .size(px_(80.0)),
+                )
+                .into_any()
+        };
+
+        harness.frame(build());
+        harness.drag_to(40.0, 40.0);
+        harness.frame_at(1.0, build());
+        assert!(shows_tooltip(&harness, "First"));
+
+        harness.drag_to(240.0, 40.0);
+        harness.frame_at(1.1, build());
+        assert!(!shows_tooltip(&harness, "First"), "it followed the pointer away");
+    }
+
+    #[test]
+    fn pressing_anything_puts_a_tooltip_away() {
+        let mut harness = Harness::new();
+        harness.cx.access.active = true;
+        let build = || {
+            div()
+                .size_full()
+                .child(div().size(px_(80.0)).tooltip("Delete this file"))
+                .into_any()
+        };
+
+        harness.frame(build());
+        harness.drag_to(40.0, 40.0);
+        harness.frame_at(1.0, build());
+        assert!(shows_tooltip(&harness, "Delete this file"));
+
+        harness.press(40.0, 40.0);
+        harness.frame_at(1.1, build());
+        assert!(
+            !shows_tooltip(&harness, "Delete this file"),
+            "it stayed over whatever was being done"
+        );
     }
 
     // -- dragging inside the window ---------------------------------------
