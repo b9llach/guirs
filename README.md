@@ -572,6 +572,74 @@ sweep to select, double click for a word, and cut, copy, paste and select all
 on the platform shortcuts. The window owns that rather than the widget, because
 it needs the focused field and the system clipboard at once.
 
+## Commands, keys and menus
+
+Three things that are usually written down three times, written down once.
+
+A **command** is a name rather than a call. `"file:save"` is a string, and
+whoever knows how to save answers it:
+
+```rust
+div().key_context("editor").on_command("file:save", |cx| { /* save */ })
+```
+
+A **keymap** says which keys ask for which command, and where:
+
+```rust
+App::new().keymap(
+    Keymap::new()
+        .bind("cmd-s", "file:save")
+        .bind("cmd-k cmd-d", "editor:duplicate-line")
+        .bind_in("editor", "cmd-f", "editor:find")
+        .bind_in("tree", "cmd-f", "tree:filter"),
+)
+```
+
+A **menu** names the same commands, and reads its own shortcuts back out of
+the keymap:
+
+```rust
+menu_bar(&[
+    submenu("File", [
+        menu_item("New").command("file:new"),
+        menu_separator(),
+        menu_item("Save").command("file:save"),
+        submenu("Open Recent", recent_files),
+    ]),
+], state.menus.clone(), &cx.keymap)
+```
+
+Nothing is repeated, so nothing can drift: rebinding a key changes what the
+menu shows, and an entry and its shortcut reach the same handler because they
+are the same command.
+
+**Where a binding applies.** A context is a name an element claims while it or
+anything inside it has focus. `Ctrl+F` above means one thing in an editor and
+another in a file tree, and the innermost context that has something to say
+wins. A binding with no context applies everywhere and is reached only when
+nothing nearer claims the key.
+
+**Sequences.** `"cmd-k cmd-d"` is two presses. After the first the keymap holds
+still and waits. A binding that is a prefix of a longer one waits rather than
+firing, because running it immediately would make the longer one unreachable.
+
+**What a command does not do.** A binding whose command nothing answers is not
+consumed. A keymap is allowed to name commands a particular window does not do,
+and swallowing the key would stop somebody typing a letter that happens to be
+bound elsewhere.
+
+A command travels outwards from whatever has focus until something answers it,
+the way a click travels outwards from whatever was under the pointer. If
+nothing along that path answers, and when nothing is focused at all, it is
+offered to anything else that handles commands. That last part is what makes a
+menu work: nothing is focused while one is open.
+
+**Menus** nest as deep as they like, and entries can be disabled, checked, or
+separators. `context_menu` is the same list placed where the pointer is. An
+entry announces its own name and offers its shortcut as a shortcut rather than
+as part of the name, so a reader says "New" and offers Ctrl+N, rather than
+reading out "New Ctrl plus N" as though that were what it was called.
+
 ## Shipping an application
 
 Two things separate a program that runs from one that looks like it belongs on
@@ -863,6 +931,9 @@ one that does less:
   animate. Perspective, `rotateX` and `rotateY` are not.
 - **Scrolling a text area.** An area grows to fit and can be capped with
   `max_h`, but it does not scroll to keep the caret in view once it is capped.
+- **Walking a menu with the keyboard.** A menu opens, chooses and closes with
+  the pointer, and every entry is reachable through the accessibility layer,
+  but the arrow keys do not yet move through an open one.
 - **Forgetting a picture.** The image atlas has no eviction, so a window that
   shows hundreds of different pictures over a long session grows until it hits
   the eight page limit and then refuses new ones. Enough for an interface with
