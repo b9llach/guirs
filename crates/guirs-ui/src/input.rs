@@ -1352,6 +1352,141 @@ mod tests {
         assert_eq!(clicks.get(), 0, "the row under the scrollbar must not click");
     }
 
+    // -- commands and key contexts ----------------------------------------
+
+    #[test]
+    fn a_command_reaches_the_element_that_answers_it() {
+        let ran = Model::new(String::new());
+        let saved = ran.clone();
+
+        let mut harness = Harness::new();
+        harness.frame(
+            div()
+                .size_full()
+                .key_context("workspace")
+                .on_command("file:save", move |_| saved.set("saved".into()))
+                .child(div().size(px_(10.0)).focusable().autofocus())
+                .into_any(),
+        );
+
+        assert!(harness.cx.dispatch_command("file:save").handled);
+        assert_eq!(ran.get(), "saved");
+    }
+
+    #[test]
+    fn a_command_travels_outwards_until_something_takes_it() {
+        // The nearer handler wins, and the outer one is left alone. This is
+        // what lets a pane answer what the editor inside it ignores.
+        let ran = Model::new(String::new());
+        let outer = ran.clone();
+        let inner = ran.clone();
+
+        let mut harness = Harness::new();
+        harness.frame(
+            div()
+                .size_full()
+                .on_command("edit:copy", move |_| outer.set("outer".into()))
+                .child(
+                    div()
+                        .size(px_(10.0))
+                        .focusable()
+                        .autofocus()
+                        .on_command("edit:copy", move |_| inner.set("inner".into())),
+                )
+                .into_any(),
+        );
+
+        harness.cx.dispatch_command("edit:copy");
+        assert_eq!(ran.get(), "inner");
+    }
+
+    #[test]
+    fn a_command_nothing_answers_is_not_an_error() {
+        let mut harness = Harness::new();
+        harness.frame(div().size_full().into_any());
+        assert!(!harness.cx.dispatch_command("nobody:answers").handled);
+    }
+
+    #[test]
+    fn the_focused_element_knows_which_contexts_enclose_it() {
+        let mut harness = Harness::new();
+        harness.frame(
+            div()
+                .size_full()
+                .key_context("workspace")
+                .child(
+                    div()
+                        .key_context("editor")
+                        .size(px_(10.0))
+                        .focusable()
+                        .autofocus(),
+                )
+                .into_any(),
+        );
+
+        let contexts: Vec<&str> = harness
+            .cx
+            .focused_contexts
+            .iter()
+            .map(|c| c.as_ref())
+            .collect();
+        assert_eq!(contexts, ["workspace", "editor"], "outermost first");
+    }
+
+    #[test]
+    fn a_context_that_does_not_enclose_focus_is_not_claimed() {
+        // Two siblings, one focused. The other's context must not appear, or
+        // a binding meant for the file tree would fire while typing in the
+        // editor next to it.
+        let mut harness = Harness::new();
+        harness.frame(
+            div()
+                .size_full()
+                .child(div().key_context("tree").size(px_(10.0)))
+                .child(
+                    div()
+                        .key_context("editor")
+                        .size(px_(10.0))
+                        .focusable()
+                        .autofocus(),
+                )
+                .into_any(),
+        );
+
+        let contexts: Vec<&str> = harness
+            .cx
+            .focused_contexts
+            .iter()
+            .map(|c| c.as_ref())
+            .collect();
+        assert_eq!(contexts, ["editor"]);
+    }
+
+    #[test]
+    fn losing_focus_clears_the_context() {
+        let mut harness = Harness::new();
+        harness.frame(
+            div()
+                .size_full()
+                .child(
+                    div()
+                        .key_context("editor")
+                        .size(px_(10.0))
+                        .focusable()
+                        .autofocus(),
+                )
+                .into_any(),
+        );
+        assert!(!harness.cx.focused_contexts.is_empty());
+
+        // Focus taken away, then another frame. A press now must not still
+        // resolve against where focus used to be.
+        harness.cx.input.focused = None;
+        harness.frame(div().size_full().into_any());
+        assert!(harness.cx.focused_contexts.is_empty());
+        assert!(harness.cx.focused_chain.is_empty());
+    }
+
     #[test]
     fn a_submenu_is_hit_before_the_menu_that_opened_it() {
         // Two overlays where one is inside the other, overlapping. A menu and

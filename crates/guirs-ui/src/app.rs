@@ -192,6 +192,7 @@ pub struct App {
     system_fonts: bool,
     default_family: Option<String>,
     root_font_size: Px,
+    keymap: crate::keymap::Keymap,
 }
 
 impl Default for App {
@@ -213,6 +214,7 @@ impl App {
             system_fonts: true,
             default_family: None,
             root_font_size: Px(16.0),
+            keymap: crate::keymap::Keymap::new(),
         }
     }
 
@@ -310,6 +312,27 @@ impl App {
     }
 
     /// Load a stylesheet from disk and watch it for changes.
+    /// Which keys ask for which commands.
+    ///
+    /// Empty by default, in which case nothing is ever intercepted and every
+    /// press reaches whatever has focus, exactly as before.
+    ///
+    /// ```no_run
+    /// # use guirs_ui::{App, keymap::Keymap};
+    /// App::new().keymap(
+    ///     Keymap::new()
+    ///         .bind("cmd-s", "file:save")
+    ///         .bind_in("editor", "cmd-d", "editor:duplicate-line"),
+    /// );
+    /// ```
+    ///
+    /// Elements answer with `on_command`, and say where they are with
+    /// `key_context`.
+    pub fn keymap(mut self, keymap: crate::keymap::Keymap) -> Self {
+        self.keymap = keymap;
+        self
+    }
+
     pub fn stylesheet_file(mut self, path: impl Into<PathBuf>) -> Self {
         self.stylesheet_path = Some(path.into());
         self
@@ -563,7 +586,11 @@ impl Runner {
             id,
             WindowHost {
                 platform,
-                window: Window::new(renderer, cx, spec.root),
+                window: {
+                    let mut window = Window::new(renderer, cx, spec.root);
+                    window.set_keymap(self.config.keymap.clone());
+                    window
+                },
                 cursor_position: Point::zero(),
                 applied_cursor: CursorStyle::Default,
                 pending_drop: Vec::new(),

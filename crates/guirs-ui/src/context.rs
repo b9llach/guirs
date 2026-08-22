@@ -34,6 +34,18 @@ use crate::layout::LayoutEngine;
 
 /// A handler for pointer events.
 pub type MouseHandler = Rc<dyn Fn(&MouseEvent, &mut EventContext)>;
+/// What came of sending a command somewhere.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CommandOutcome {
+    /// Whether anything answered. An unanswered command is not an error: a
+    /// keymap is allowed to name things this window does not do.
+    pub handled: bool,
+    pub redraw: bool,
+    pub quit: bool,
+}
+
+/// A handler for a named command, which carries nothing but its own name.
+pub type CommandHandler = Rc<dyn Fn(&mut EventContext)>;
 /// A handler for wheel and trackpad events.
 pub type ScrollHandler = Rc<dyn Fn(&ScrollEvent, &mut EventContext)>;
 /// A handler for key presses.
@@ -57,6 +69,12 @@ pub struct Handlers {
     /// Called while files are over this element, and again with an empty list
     /// when they leave, so a drop target can light up and go dark again.
     pub on_file_hover: Option<FileDropHandler>,
+    /// Commands this element answers, by name.
+    ///
+    /// A command travels outwards from whatever has focus until something
+    /// answers it, the way a click travels outwards from whatever was under
+    /// the pointer, so a pane can answer what the editor inside it ignores.
+    pub on_command: Vec<(SharedString, CommandHandler)>,
 }
 
 impl Handlers {
@@ -65,6 +83,7 @@ impl Handlers {
             && self.on_mouse_down.is_none()
             && self.on_mouse_up.is_none()
             && self.on_mouse_move.is_none()
+            && self.on_command.is_empty()
             && self.on_scroll.is_none()
             && self.on_key_down.is_none()
             && self.on_text.is_none()
@@ -569,6 +588,18 @@ pub struct Cx {
     /// two places is read once and held once.
     pub images: crate::image::ImageStore,
 
+    /// Key contexts enclosing whatever is being painted, outermost first.
+    key_contexts: Vec<SharedString>,
+    /// The same stack, captured at the moment the focused element painted.
+    ///
+    /// Snapshotted rather than worked out afterwards, because paint is the one
+    /// time the whole chain above an element is known without walking back up
+    /// through it.
+    pub focused_contexts: Vec<SharedString>,
+    /// Everything enclosing the focused element, outermost first, ending with
+    /// the element itself. The path a command travels back along.
+    pub focused_chain: Vec<GlobalElementId>,
+
     /// Where the focused field's caret is, for an input method's candidate
     /// window. `None` when nothing that accepts composition has focus, which
     /// is also how the runtime knows to turn the input method off.
@@ -663,6 +694,9 @@ impl Cx {
             editors: HashMap::new(),
             access: crate::access::AccessTree::default(),
             images: crate::image::ImageStore::default(),
+            key_contexts: Vec::new(),
+            focused_contexts: Vec::new(),
+            focused_chain: Vec::new(),
             ime_area: None,
             snap_target: None,
             redraw_at: None,
@@ -726,6 +760,42 @@ impl Cx {
         self.style_stack.clear();
         self.opacity_stack.clear();
         self.paint_stack.clear();
+        self.key_contexts.clear();
+        // Cleared rather than left standing, so a key press after focus goes
+        // away resolves against nothing rather than against wherever focus
+        // used to be.
+        self.focused_contexts.clear();
+        self.focused_chain.clear();
+    }
+
+    /// Send a command to whatever answers it, starting from the keyboard.
+    ///
+    /// Travels outwards from the focused element until something takes it, the
+    /// way a click travels outwards from whatever was under the pointer.
+    /// Returns whether anything did.
+    pub fn dispatch_command(&mut self, command: &str) -> CommandOutcome {
+        let chain: Vec<GlobalElementId> = self.focused_chain.iter().rev().copied().collect();
+        for id in chain {
+            let Some(handlers) = self.handlers.get(&id) else {
+                continue;
+            };
+            let Some((_, handler)) = handlers
+                .on_command
+                .iter()
+                .find(|(name, _)| name.as_ref() == command)
+            else {
+                continue;
+            };
+            let handler = handler.clone();
+
+            let mut redraw = false;
+            let mut quit = false;
+            let mut context =
+                EventContext::new(&mut self.input, &mut self.state, &mut redraw, &mut quit);
+            handler(&mut context);
+            return CommandOutcome { handled: true, redraw, quit };
+        }
+        CommandOutcome::default()
     }
 
     /// Finish a frame, evicting state nobody used.
@@ -908,6 +978,31 @@ impl Cx {
     /// Note that an element is now painting its children.
     pub fn begin_paint(&mut self, id: GlobalElementId) {
         self.paint_stack.push(id);
+    }
+
+    /// Claim a key context for everything painted until it is released.
+    pub fn push_key_context(&mut self, context: SharedString) {
+        self.key_contexts.push(context);
+    }
+
+    pub fn pop_key_context(&mut self) {
+        self.key_contexts.pop();
+    }
+
+    /// Record where the keyboard is, if this element is where it is.
+    ///
+    /// Called by every element as it paints. The one that has focus keeps a
+    /// copy of everything enclosing it, which is what a key press is later
+    /// resolved against.
+    pub fn note_focus_path(&mut self, id: GlobalElementId) {
+        if self.input.focused != Some(id) {
+            return;
+        }
+        self.focused_contexts.clear();
+        self.focused_contexts.extend(self.key_contexts.iter().cloned());
+        self.focused_chain.clear();
+        self.focused_chain.extend(self.paint_stack.iter().copied());
+        self.focused_chain.push(id);
     }
 
     pub fn end_paint(&mut self) {

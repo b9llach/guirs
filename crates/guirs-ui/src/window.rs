@@ -30,6 +30,11 @@ pub struct Window {
     start: Instant,
 
     background: Rgba,
+    /// Which keys ask for which commands. Empty by default, in which case no
+    /// key press is ever intercepted.
+    keymap: crate::keymap::Keymap,
+    /// Whatever part of a sequence has been typed but not yet resolved.
+    keys: crate::keymap::KeymapState,
     needs_redraw: bool,
     should_close: bool,
     last_frame_stats: guirs_render::SceneStats,
@@ -43,6 +48,8 @@ impl Window {
             renderer,
             root,
             input: InputRouter::new(),
+            keymap: crate::keymap::Keymap::new(),
+            keys: crate::keymap::KeymapState::default(),
             start: Instant::now(),
             needs_redraw: true,
             should_close: false,
@@ -215,13 +222,62 @@ impl Window {
     }
 
     /// Feed one input event through the tree.
+    /// Install the keymap this window resolves presses against.
+    pub fn set_keymap(&mut self, keymap: crate::keymap::Keymap) {
+        self.keymap = keymap;
+        self.keys.clear();
+    }
+
+    /// Whether a sequence is part way through, for showing in a status bar.
+    pub fn pending_keys(&self) -> &[crate::keymap::Keystroke] {
+        self.keys.pending()
+    }
+
+    /// Send a command to whatever answers it, as a menu would.
+    pub fn dispatch_command(&mut self, command: &str) -> bool {
+        let outcome = self.cx.dispatch_command(command);
+        self.needs_redraw |= outcome.redraw || outcome.handled;
+        self.should_close |= outcome.quit;
+        outcome.handled
+    }
+
     pub fn handle_event(&mut self, event: InputEvent) {
+        if let InputEvent::KeyDown(key) = &event {
+            if self.handle_binding(key) {
+                return;
+            }
+        }
         let outcome = self.input.handle(&mut self.cx, &event);
         if outcome.redraw {
             self.needs_redraw = true;
         }
         if outcome.quit {
             self.should_close = true;
+        }
+    }
+
+    /// Give the keymap first refusal on a press.
+    ///
+    /// Returns whether the press was taken. A binding that resolves to a
+    /// command nothing answers is *not* taken: a keymap is allowed to name
+    /// commands a particular window does not do, and swallowing the key would
+    /// stop somebody typing a letter that happens to be bound elsewhere.
+    fn handle_binding(&mut self, key: &crate::event::KeyEvent) -> bool {
+        use crate::keymap::Match;
+
+        let contexts = std::mem::take(&mut self.cx.focused_contexts);
+        let outcome = self.keys.press(&self.keymap, &contexts, key);
+        self.cx.focused_contexts = contexts;
+
+        match outcome {
+            Match::None => false,
+            // Half of a sequence. Taken, so the key does not also type a
+            // letter, and the next press decides what it meant.
+            Match::Pending => {
+                self.needs_redraw = true;
+                true
+            }
+            Match::Command(command) => self.dispatch_command(&command),
         }
     }
 

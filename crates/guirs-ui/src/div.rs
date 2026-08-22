@@ -51,6 +51,9 @@ pub struct Div {
     focusable: bool,
     extra_state: StateFlags,
     overlay: bool,
+    /// Named so a keymap can say "only here". Claimed by everything painted
+    /// inside this element, not only by the element itself.
+    key_context: Option<SharedString>,
     stick_to_bottom: bool,
     on_dismiss: Option<DismissHandler>,
     virtual_rows: Option<VirtualRows>,
@@ -90,6 +93,7 @@ impl Div {
             focusable: false,
             extra_state: StateFlags::EMPTY,
             overlay: false,
+            key_context: None,
             stick_to_bottom: false,
             on_dismiss: None,
             virtual_rows: None,
@@ -178,6 +182,42 @@ impl Div {
     /// parent's scroll viewport.
     pub fn overlay(mut self) -> Self {
         self.overlay = true;
+        self
+    }
+
+    /// Name where the keyboard is, for a keymap to bind against.
+    ///
+    /// The name applies to this element and everything inside it while any of
+    /// it has focus, so a keymap can give one key different meanings in an
+    /// editor and in a file tree without either knowing about the other.
+    ///
+    /// ```
+    /// # use guirs_ui::div::div;
+    /// div().key_context("editor");
+    /// ```
+    pub fn key_context(mut self, context: impl Into<SharedString>) -> Self {
+        self.key_context = Some(context.into());
+        self
+    }
+
+    /// Answer a command, whether it came from a key, a menu or anywhere else.
+    ///
+    /// A command travels outwards from whatever has focus until something
+    /// answers it, so the innermost element that cares gets it and everything
+    /// else can ignore it.
+    ///
+    /// ```
+    /// # use guirs_ui::div::div;
+    /// div().on_command("file:save", |_cx| { /* save */ });
+    /// ```
+    pub fn on_command(
+        mut self,
+        command: impl Into<SharedString>,
+        handler: impl Fn(&mut crate::EventContext) + 'static,
+    ) -> Self {
+        self.handlers
+            .on_command
+            .push((command.into(), std::rc::Rc::new(handler)));
         self
     }
 
@@ -675,12 +715,25 @@ impl Element for Div {
             bounds.origin.x - scroll.offset.x,
             bounds.origin.y - scroll.offset.y,
         );
+        // Claimed around the children, so everything inside is in this
+        // context and the element itself is too.
+        if let Some(context) = &self.key_context {
+            cx.push_key_context(context.clone());
+        }
+        // Recorded before the children paint, so an element that is itself
+        // focused captures the contexts enclosing it including its own.
+        cx.note_focus_path(self.global_id);
+
         cx.begin_paint(self.global_id);
         for (child, node) in self.children.iter_mut().zip(self.child_nodes.iter()) {
             let child_bounds = cx.layout.absolute_bounds(*node, child_origin);
             child.paint(child_bounds, cx);
         }
         cx.end_paint();
+
+        if self.key_context.is_some() {
+            cx.pop_key_context();
+        }
 
         if clips {
             cx.scene.pop_clip();
