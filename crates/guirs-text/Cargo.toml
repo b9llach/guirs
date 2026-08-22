@@ -1,0 +1,19 @@
+[package]
+name = "guirs-text"
+description = "Font loading, shaping and glyph rasterization for guirs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+guirs-core.workspace = true
+guirs-style.workspace = true
+ahash.workspace = true
+smallvec.workspace = true
+fontdb.workspace = true
+swash.workspace = true
+unicode-bidi.workspace = true
+unicode-segmentation.workspace = true

@@ -1,0 +1,42 @@
+[package]
+name = "guirs-ui"
+description = "Element tree, layout, events and widgets for guirs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+guirs-core.workspace = true
+guirs-style.workspace = true
+guirs-text.workspace = true
+guirs-render.workspace = true
+ahash.workspace = true
+arboard.workspace = true
+smallvec.workspace = true
+taffy.workspace = true
+winit.workspace = true
+accesskit.workspace = true
+accesskit_winit.workspace = true
+raw-window-handle.workspace = true
+rfd.workspace = true
+pollster.workspace = true
+log.workspace = true
+notify.workspace = true
+image.workspace = true
+
+# On Linux a dialog needs a backend chosen at build time. The desktop portal is
+# the modern one and works under both Wayland and X11; nothing else needs it.
+# Snap Layouts and the caption button hit test are Win32 only.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rfd = { workspace = true, features = ["xdg-portal", "async-std"] }

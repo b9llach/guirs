@@ -1,0 +1,20 @@
+[package]
+name = "guirs-render"
+description = "GPU renderer for guirs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+guirs-core.workspace = true
+guirs-text.workspace = true
+ahash.workspace = true
+bytemuck.workspace = true
+wgpu.workspace = true
+zeno.workspace = true
+raw-window-handle.workspace = true
+log.workspace = true
+pollster.workspace = true

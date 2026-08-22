@@ -1,0 +1,13 @@
+[package]
+name = "guirs-core"
+description = "Core geometry, units, color and paint vocabulary for the guirs GUI framework"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+ahash.workspace = true
+bytemuck.workspace = true

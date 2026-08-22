@@ -1,0 +1,443 @@
+/* ==========================================================================
+   guirs chat
+
+   A light interface, laid out against a reference screenshot to see how
+   closely the framework can be held to one. The dark theme this replaced is
+   still here as theme-dark.gss.
+
+   Edit this while the application is running. It is watched and reloaded.
+   ========================================================================== */
+
+:root {
+    --bg:            #ffffff;
+    --sidebar:       #f9f9f9;
+    --surface:       #ffffff;
+    --surface-high:  #f4f4f4;
+    --raised:        #ececec;
+
+    --text:          #0d0d0d;
+    --text-soft:     #5d5d5d;
+    --text-faint:    #8f8f8f;
+
+    --line:          #e5e5e5;
+    --line-soft:     #ececec;
+
+    --accent:        #0d0d0d;
+    --accent-high:   #2f2f2f;
+    --accent-soft:   #f4f4f4;
+
+    --selection:     rgba(13, 13, 13, 0.14);
+
+    --caret:         #0d0d0d;
+    /* How long the caret spends lit, and then dark. `none` keeps it solid. */
+    --caret-blink:   530ms;
+    --caret-width:   1.5px;
+    --caret-radius:  1px;
+
+    --scrollbar-thumb: rgba(13, 13, 13, 0.18);
+    --scrollbar-track: transparent;
+
+    /* Inline spans inside a reply. */
+    --code-text:     #0d0d0d;
+    --code-surface:  rgba(13, 13, 13, 0.06);
+    --link:          #2964aa;
+
+    --radius-sm:     8px;
+    --radius:        12px;
+    --radius-lg:     26px;
+    --speed:         120ms;
+}
+
+.root {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI Variable Text", "Segoe UI", "SF Pro Text", "Helvetica Neue", sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+/* --------------------------------------------------------------------------
+   Window bar
+   -------------------------------------------------------------------------- */
+
+.window-bar {
+    height: 32px;
+    padding-left: 10px;
+    background: var(--bg);
+    align-items: center;
+    gap: 8px;
+}
+
+.window-mark {
+    width: 15px;
+    height: 15px;
+    color: var(--text-soft);
+}
+
+.window-brand {
+    font-size: 12px;
+    color: var(--text-soft);
+}
+
+.window-stats {
+    font-size: 11px;
+    color: #c8c8c8;
+    font-family: "Cascadia Mono", "Consolas", monospace;
+    padding-right: 10px;
+}
+
+/* Type selectors, not classes: the chrome builds these as elements named
+   `window-button`, so `.window-button` matches nothing and they collapse to
+   the size of their glyph. */
+window-controls { height: 32px; }
+
+window-button {
+    width: 46px;
+    height: 32px;
+    /* Windows draws its caption glyphs at full contrast, not muted. */
+    color: var(--text);
+    align-items: center;
+    justify-content: center;
+    transition: background var(--speed) ease-out;
+}
+
+window-button:hover       { background: rgba(13, 13, 13, 0.06); }
+window-button.close:hover { background: #c42b1c; color: #ffffff; }
+window-button icon        { width: 10px; height: 10px; }
+
+/* The glyph is text from the system's title bar font on Windows, so it is
+   sized like text rather than like an icon. */
+window-glyph { font-size: 10px; }
+
+/* --------------------------------------------------------------------------
+   Sidebar
+   -------------------------------------------------------------------------- */
+
+.sidebar {
+    width: 260px;
+    background: var(--sidebar);
+    padding-left: 8px;
+    padding-right: 8px;
+    padding-bottom: 10px;
+}
+
+.sidebar-top {
+    height: 52px;
+    align-items: center;
+    padding-left: 5px;
+    padding-right: 5px;
+    gap: 2px;
+}
+
+.icon-button {
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius-sm);
+    color: var(--text-soft);
+    align-items: center;
+    justify-content: center;
+    transition: background var(--speed) ease-out, transform 90ms ease-out;
+}
+
+.icon-button:hover  { background: var(--raised); color: var(--text); }
+.icon-button:active { transform: scale(0.92); }
+.icon-button icon   { width: 20px; height: 20px; }
+
+.nav-item {
+    height: 36px;
+    border-radius: var(--radius-sm);
+    padding-left: 9px;
+    padding-right: 9px;
+    gap: 10px;
+    align-items: center;
+    color: var(--text);
+    transition: background var(--speed) ease-out;
+}
+
+.nav-item:hover  { background: var(--raised); }
+.nav-item.active { background: var(--raised); }
+.nav-item icon   { width: 18px; height: 18px; color: var(--text); }
+.nav-label       { font-size: 14px; }
+
+.sidebar-label {
+    font-size: 12px;
+    color: var(--text-faint);
+    padding-top: 14px;
+    padding-left: 10px;
+    padding-bottom: 6px;
+}
+
+.conversation {
+    padding: 7px 9px;
+    border-radius: var(--radius-sm);
+    transition: background var(--speed) ease-out;
+}
+
+.conversation:hover  { background: var(--raised); }
+.conversation.active { background: var(--raised); }
+
+.conversation-title   { font-size: 14px; color: var(--text); }
+.conversation-preview { font-size: 12px; color: var(--text-faint); }
+
+/* --------------------------------------------------------------------------
+   Header
+   -------------------------------------------------------------------------- */
+
+.header {
+    height: 48px;
+    padding-left: 14px;
+    padding-right: 14px;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg);
+}
+
+.model-picker {
+    height: 34px;
+    padding-left: 8px;
+    padding-right: 8px;
+    border-radius: var(--radius-sm);
+    align-items: center;
+    gap: 3px;
+    transition: background var(--speed) ease-out;
+}
+
+.model-picker:hover { background: var(--surface-high); }
+.model-picker icon  { width: 15px; height: 15px; color: var(--text-soft); }
+
+.model-name {
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.pill {
+    height: 36px;
+    padding-left: 14px;
+    padding-right: 14px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+    align-items: center;
+    gap: 7px;
+    transition: background var(--speed) ease-out;
+}
+
+.pill:hover { background: var(--surface-high); }
+.pill icon  { width: 15px; height: 15px; }
+
+.avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    background: #cfcfcf;
+}
+
+/* --------------------------------------------------------------------------
+   The empty state, which is what the reference shows
+   -------------------------------------------------------------------------- */
+
+.stage {
+    align-items: center;
+    justify-content: center;
+    padding-bottom: 40px;
+    gap: 30px;
+}
+
+.greeting {
+    font-size: 28px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.4px;
+}
+
+/* --------------------------------------------------------------------------
+   Composer
+   -------------------------------------------------------------------------- */
+
+.composer {
+    width: 100%;
+    padding-left: 20px;
+    padding-right: 20px;
+    align-items: center;
+}
+
+.composer-box {
+    width: 100%;
+    max-width: 768px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    padding: 13px 13px 10px 13px;
+    box-shadow: 0 2px 8px rgba(13, 13, 13, 0.06);
+    transition: border-color var(--speed) ease-out;
+}
+
+.composer-box.filled { border-color: #d4d4d4; }
+
+.composer-input {
+    font-size: 15px;
+    color: var(--text);
+    padding-left: 6px;
+    padding-right: 6px;
+    padding-bottom: 10px;
+}
+
+.composer-tools {
+    align-items: center;
+    gap: 7px;
+}
+
+.tool-round {
+    width: 36px;
+    height: 36px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    color: var(--text-soft);
+    align-items: center;
+    justify-content: center;
+    transition: background var(--speed) ease-out, transform 90ms ease-out;
+}
+
+.tool-round:hover  { background: var(--surface-high); }
+.tool-round:active { transform: scale(0.92); }
+.tool-round icon   { width: 19px; height: 19px; }
+
+.tool {
+    height: 36px;
+    padding-left: 13px;
+    padding-right: 13px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    color: var(--text-faint);
+    font-size: 14px;
+    align-items: center;
+    gap: 7px;
+    transition: background var(--speed) ease-out, color var(--speed) ease-out,
+                transform 90ms ease-out;
+}
+
+.tool:hover  { background: var(--surface-high); color: var(--text-soft); }
+.tool:active { transform: scale(0.95); }
+.tool.marked { color: var(--text); font-weight: 600; }
+.tool icon   { width: 17px; height: 17px; }
+
+.voice {
+    width: 36px;
+    height: 36px;
+    border-radius: 999px;
+    background: var(--text);
+    color: #ffffff;
+    align-items: center;
+    justify-content: center;
+    transition: background var(--speed) ease-out, transform 90ms ease-out;
+}
+
+.voice:hover  { background: var(--accent-high); }
+.voice:active { transform: scale(0.92); }
+.voice icon   { width: 18px; height: 18px; }
+
+.send {
+    width: 36px;
+    height: 36px;
+    border-radius: 999px;
+    background: var(--raised);
+    color: #ffffff;
+    align-items: center;
+    justify-content: center;
+    transition: background var(--speed) ease-out, transform 90ms ease-out;
+}
+
+.send.ready        { background: var(--text); }
+.send.ready:hover  { background: var(--accent-high); }
+.send.ready:active { transform: scale(0.92); }
+.send-icon         { width: 18px; height: 18px; }
+
+.disclaimer {
+    font-size: 12px;
+    color: var(--text-faint);
+    padding-bottom: 22px;
+    align-self: center;
+}
+
+/* --------------------------------------------------------------------------
+   Transcript
+   -------------------------------------------------------------------------- */
+
+.thread {
+    padding-left: 20px;
+    padding-right: 20px;
+    /* The transcript is capped at a readable width, so it has to be centred
+       in whatever room it is given or it drifts left of the composer as the
+       window widens. */
+    align-items: center;
+}
+
+.thread-inner {
+    width: 100%;
+    max-width: 770px;
+    padding-top: 20px;
+    padding-bottom: 10px;
+    gap: 22px;
+}
+
+.turn { gap: 12px; }
+
+.turn-role {
+    font-size: 12px;
+    color: var(--text-faint);
+}
+
+.bubble {
+    border-radius: 18px;
+    padding: 10px 15px;
+    max-width: 560px;
+}
+
+.from-you .bubble {
+    background: var(--surface-high);
+    color: var(--text);
+}
+
+.from-assistant .bubble {
+    background: transparent;
+    padding-left: 0;
+}
+
+.bubble-text {
+    font-size: 15px;
+    line-height: 1.62;
+    color: var(--text);
+    white-space: pre-wrap;
+}
+
+/* The block that follows a reply while it is still arriving. */
+.caret {
+    width: 8px;
+    height: 15px;
+    margin-top: 3px;
+    border-radius: 2px;
+    background: var(--text);
+}
+
+.turn-avatar {
+    width: 26px;
+    height: 26px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    align-items: center;
+    justify-content: center;
+    color: var(--text-soft);
+}
+
+.turn-avatar icon { width: 15px; height: 15px; }
+
+/* --------------------------------------------------------------------------
+   Scrollbars
+   -------------------------------------------------------------------------- */
+
+scrollbar       { width: 10px; }
+scrollbar-thumb { border-radius: 999px; }

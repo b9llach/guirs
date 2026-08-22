@@ -1,0 +1,442 @@
+/* ==========================================================================
+   guirs kitchen sink theme
+
+   Edit this file while the app is running. It is watched and reloaded, so
+   colors, radii, spacing and transitions all change without a rebuild.
+   ========================================================================== */
+
+:root {
+    /* Surfaces, darkest to lightest. */
+    --background:   #11111b;
+    --surface:      #181825;
+    --surface-high: #1e1e2e;
+    --overlay:      #262637;
+
+    /* Brand. */
+    --primary:      #6c5ce7;
+    --primary-high: #8071ec;
+    --accent:       #00cec9;
+    --danger:       #e05561;
+    --success:      #3fb950;
+
+    /* Ink. */
+    --text:         #cdd6f4;
+    --text-muted:   #8b8ba7;
+    --text-bright:  #ffffff;
+
+    /* Lines. */
+    --border:       #2c2c40;
+    --border-high:  #3d3d57;
+
+    /* Interaction. */
+    --selection:      rgba(108, 92, 231, 0.35);
+    --caret:          #cdd6f4;
+    /* How long the caret spends lit, and then dark. `none` keeps it solid. */
+    --caret-blink:   530ms;
+    --caret-width:   1.5px;
+    --caret-radius:  1px;
+    --scrollbar-thumb: rgba(205, 214, 244, 0.18);
+    --scrollbar-track: transparent;
+
+    /* Scale. */
+    --radius-sm:    4px;
+    --radius:       8px;
+    --radius-lg:    12px;
+    --gap:          10px;
+    --pad:          14px;
+
+    --speed:        140ms;
+}
+
+/* --------------------------------------------------------------------------
+   Foundations
+   -------------------------------------------------------------------------- */
+
+.root {
+    background: var(--background);
+    color: var(--text);
+    font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+.muted    { color: var(--text-muted); }
+.bright   { color: var(--text-bright); }
+.small    { font-size: 12px; }
+.mono     { font-family: "Cascadia Mono", "Consolas", "Menlo", monospace; }
+
+.title {
+    font-size: 21px;
+    font-weight: 600;
+    color: var(--text-bright);
+    letter-spacing: -0.2px;
+}
+
+.section-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: 0.9px;
+}
+
+/* --------------------------------------------------------------------------
+   Structure
+   -------------------------------------------------------------------------- */
+
+panel {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: var(--pad);
+    gap: var(--gap);
+}
+
+card {
+    background: var(--surface-high);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 18px;
+    gap: var(--gap);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
+}
+
+.titlebar {
+    background: linear-gradient(180deg, var(--surface-high), var(--surface));
+    border-bottom: 1px solid var(--border);
+    padding: 0 16px;
+    height: 46px;
+}
+
+.divider {
+    background: var(--border);
+    height: 1px;
+}
+
+/* --------------------------------------------------------------------------
+   Buttons
+   -------------------------------------------------------------------------- */
+
+button {
+    background: var(--overlay);
+    color: var(--text);
+    border: 1px solid var(--border-high);
+    border-radius: var(--radius);
+    padding: 8px 15px;
+    font-size: 13px;
+    font-weight: 500;
+    transition: background var(--speed) ease-out, border-color var(--speed) ease-out,
+                box-shadow var(--speed) ease-out, color var(--speed) ease-out;
+}
+
+button:hover  { background: lighten(#262637, 22%); border-color: var(--border-high); }
+button:active { background: darken(#262637, 18%); }
+
+button:focus-visible {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(108, 92, 231, 0.35);
+}
+
+button.primary {
+    background: linear-gradient(180deg, var(--primary-high), var(--primary));
+    border-color: var(--primary);
+    color: #ffffff;
+    box-shadow: 0 2px 8px rgba(108, 92, 231, 0.4);
+}
+
+button.primary:hover {
+    background: linear-gradient(180deg, lighten(#8071ec, 12%), var(--primary-high));
+    box-shadow: 0 4px 16px rgba(108, 92, 231, 0.55);
+}
+
+button.primary:active {
+    background: linear-gradient(180deg, var(--primary), darken(#6c5ce7, 12%));
+    box-shadow: 0 1px 4px rgba(108, 92, 231, 0.4);
+}
+
+button.danger  { background: var(--danger); border-color: var(--danger); color: #ffffff; }
+button.danger:hover { background: lighten(#e05561, 12%); }
+
+button.ghost {
+    background: none;
+    border-color: transparent;
+    color: var(--text-muted);
+}
+button.ghost:hover { background: var(--overlay); color: var(--text); }
+
+button.icon {
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-sm);
+}
+
+button.pill { border-radius: 999px; padding: 8px 18px; }
+
+/* --------------------------------------------------------------------------
+   Checkbox, radio, toggle
+   -------------------------------------------------------------------------- */
+
+checkbox { gap: 9px; padding: 3px 0; }
+
+checkbox-box {
+    width: 18px;
+    height: 18px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-high);
+    background: var(--surface);
+    transition: background var(--speed) ease-out, border-color var(--speed) ease-out;
+}
+
+checkbox:hover checkbox-box { border-color: var(--primary); }
+
+checkbox-box:checked {
+    background: var(--primary);
+    border-color: var(--primary);
+}
+
+checkbox-mark { color: #ffffff; font-size: 12px; font-weight: 700; }
+checkbox-label { font-size: 13px; }
+
+radio { gap: 9px; padding: 3px 0; }
+
+radio-mark {
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    border: 1px solid var(--border-high);
+    background: var(--surface);
+    transition: border-color var(--speed) ease-out;
+}
+
+radio-mark:selected { border-color: var(--primary); }
+radio-dot { width: 9px; height: 9px; background: var(--primary); }
+radio-label { font-size: 13px; }
+
+toggle {
+    width: 42px;
+    height: 24px;
+    border-radius: 999px;
+    background: var(--overlay);
+    border: 1px solid var(--border-high);
+    padding: 2px;
+    transition: background var(--speed) ease-out, border-color var(--speed) ease-out;
+}
+
+toggle:checked { background: var(--primary); border-color: var(--primary); }
+
+toggle-knob {
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    background: var(--text-muted);
+    transition: background var(--speed) ease-out;
+}
+
+toggle-knob:checked { background: #ffffff; }
+
+/* --------------------------------------------------------------------------
+   Slider and progress
+   -------------------------------------------------------------------------- */
+
+slider { height: 22px; width: 100%; }
+
+slider-track {
+    height: 5px;
+    border-radius: 999px;
+    background: var(--overlay);
+}
+
+slider-fill {
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--primary), var(--accent));
+}
+
+slider-thumb {
+    width: 15px;
+    height: 15px;
+    margin-left: -7px;
+    border-radius: 999px;
+    background: #ffffff;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+    transition: box-shadow var(--speed) ease-out;
+}
+
+slider:hover slider-thumb { box-shadow: 0 0 0 6px rgba(108, 92, 231, 0.28); }
+
+progress {
+    height: 7px;
+    width: 100%;
+    border-radius: 999px;
+    background: var(--overlay);
+    overflow: hidden;
+}
+
+progress-fill {
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--accent), var(--primary));
+}
+
+/* --------------------------------------------------------------------------
+   Select
+   -------------------------------------------------------------------------- */
+
+select {
+    background: var(--surface);
+    border: 1px solid var(--border-high);
+    border-radius: var(--radius);
+    padding: 8px 12px;
+    min-width: 168px;
+    font-size: 13px;
+    transition: border-color var(--speed) ease-out, background var(--speed) ease-out;
+}
+
+select:hover { border-color: var(--primary); }
+select:open  { border-color: var(--primary); background: var(--surface-high); }
+
+select-arrow { color: var(--text-muted); font-size: 11px; }
+
+select-popup {
+    width: 100%;
+    margin-top: 5px;
+    background: var(--overlay);
+    border: 1px solid var(--border-high);
+    border-radius: var(--radius);
+    padding: 5px;
+    gap: 2px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+}
+
+select-option {
+    padding: 7px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    transition: background var(--speed) ease-out;
+}
+
+select-option:hover    { background: lighten(#262637, 24%); }
+select-option:selected { background: var(--primary); color: #ffffff; }
+
+/* --------------------------------------------------------------------------
+   Tabs and lists
+   -------------------------------------------------------------------------- */
+
+tab-bar { gap: 3px; border-bottom: 1px solid var(--border); }
+
+tab {
+    padding: 9px 15px;
+    font-size: 13px;
+    color: var(--text-muted);
+    border-bottom: 2px solid transparent;
+    transition: color var(--speed) ease-out, border-color var(--speed) ease-out;
+}
+
+tab:hover    { color: var(--text); }
+tab:selected { color: var(--text-bright); border-bottom-color: var(--primary); }
+
+list-item {
+    padding: 8px 11px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    gap: 9px;
+    transition: background var(--speed) ease-out;
+}
+
+list-item:hover    { background: var(--overlay); }
+list-item:selected { background: var(--primary); color: #ffffff; }
+
+/* --------------------------------------------------------------------------
+   Text input
+   -------------------------------------------------------------------------- */
+
+input {
+    background: var(--background);
+    border: 1px solid var(--border-high);
+    border-radius: var(--radius);
+    padding: 8px 11px;
+    height: 36px;
+    min-width: 220px;
+    font-size: 13px;
+    transition: border-color var(--speed) ease-out, box-shadow var(--speed) ease-out;
+}
+
+input:hover { border-color: var(--primary); }
+
+input:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(108, 92, 231, 0.3);
+}
+
+/* --------------------------------------------------------------------------
+   Demo specific
+   -------------------------------------------------------------------------- */
+
+.sidebar { width: 216px; }
+
+.content { padding: 22px; gap: 18px; }
+
+.swatch {
+    width: 54px;
+    height: 54px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    transition: border-radius 220ms ease-in-out;
+}
+
+.swatch:hover { border-radius: 999px; }
+
+/* Transforms. Paint only, so none of these move anything around them. */
+.tile {
+    width: 92px;
+    height: 62px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--surface-high);
+    color: var(--text-muted);
+    font-size: 12px;
+    align-items: center;
+    justify-content: center;
+    transition: transform 160ms ease-out, border-color 160ms ease-out;
+}
+
+.tile:hover { border-color: var(--primary); transform: scale(1.06); }
+
+/* A field that holds more than one line. */
+textarea {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 9px 11px;
+    color: var(--text);
+    line-height: 1.55;
+    transition: border-color var(--speed) ease-out;
+}
+
+textarea:focus { border-color: var(--primary); }
+
+/* Where files from the desktop can be let go. */
+.drop-target {
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+}
+
+.drop-target:hover { border-color: var(--primary); }
+
+.badge {
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: var(--primary);
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    gap: 3px;
+}
+
+.stat-value { font-size: 22px; font-weight: 600; color: var(--text-bright); }
+.stat-label { font-size: 11px; color: var(--text-muted); }

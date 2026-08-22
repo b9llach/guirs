@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  # A backtrace on a failing test is the difference between a useful CI log and
+  # a line saying a test failed.
+  RUST_BACKTRACE: 1
+
+jobs:
+  test:
+    name: test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform failing should not hide what the others would have said.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      # The dialogs go through the desktop portal on Linux, which needs the
+      # D-Bus development headers to build.
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config
+
+      - name: Build
+        run: cargo build --workspace --all-targets
+
+      # Nothing here needs a GPU: the renderer is only constructed by an open
+      # window, and every test that touches painting builds a scene and throws
+      # it away. That is deliberate, and it is what makes this job possible.
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Docs
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --no-deps
+
+  minimum-rust-version:
+    name: build on the oldest supported compiler
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Kept in step with `rust-version` in the workspace manifest. Claiming a
+      # minimum without building against it is claiming nothing.
+      - uses: dtolnay/rust-toolchain@1.87.0
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config
+
+      - name: Build
+        run: cargo build --workspace

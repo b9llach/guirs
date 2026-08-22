@@ -1,0 +1,70 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/guirs-core",
+    "crates/guirs-style",
+    "crates/guirs-text",
+    "crates/guirs-render",
+    "crates/guirs-ui",
+    "crates/guirs-build",
+    "crates/guirs",
+    "examples/kitchen-sink",
+    "apps/chat",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+# Set by wgpu 30, which declares 1.87, and by a transitive dependency using
+# edition 2024. Claiming anything lower would be claiming something untrue.
+rust-version = "1.87"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/b9llach/guirs"
+authors = ["guirs contributors"]
+
+[workspace.dependencies]
+guirs-core = { path = "crates/guirs-core", version = "0.1.0" }
+guirs-style = { path = "crates/guirs-style", version = "0.1.0" }
+guirs-text = { path = "crates/guirs-text", version = "0.1.0" }
+guirs-render = { path = "crates/guirs-render", version = "0.1.0" }
+guirs-ui = { path = "crates/guirs-ui", version = "0.1.0" }
+guirs-build = { path = "crates/guirs-build", version = "0.1.0" }
+
+ahash = "0.8"
+arboard = { version = "3", default-features = false }
+bytemuck = { version = "1", features = ["derive"] }
+fontdb = "0.24"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+log = "0.4"
+notify = "8"
+pollster = "1"
+raw-window-handle = "0.6"
+windows-sys = "0.60"
+accesskit = "0.24"
+accesskit_winit = "0.33"
+# Native file dialogs. Default features are off because they pull in the XDG
+# portal stack on every platform; Linux builds turn a backend back on below.
+rfd = { version = "0.16", default-features = false }
+rustybuzz = "0.20"
+smallvec = { version = "1", features = ["union", "const_generics"] }
+swash = "0.2"
+taffy = "0.13"
+unicode-bidi = "0.3"
+unicode-segmentation = "1"
+wgpu = "30"
+zeno = "0.3"
+winit = "0.30"
+
+[profile.dev]
+# A user interface has to stay interactive even in a debug build, and the
+# per frame work here is real. Level 2 costs a little compile time and is the
+# difference between a usable dev build and an unusable one.
+opt-level = 2
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"

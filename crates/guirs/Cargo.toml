@@ -1,0 +1,16 @@
+[package]
+name = "guirs"
+description = "Extensible GPU accelerated GUI framework for Rust"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+guirs-core.workspace = true
+guirs-style.workspace = true
+guirs-text.workspace = true
+guirs-render.workspace = true
+guirs-ui.workspace = true

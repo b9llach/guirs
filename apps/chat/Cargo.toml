@@ -1,0 +1,18 @@
+[package]
+name = "chat"
+description = "A chat application built on guirs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "guirs-chat"
+path = "src/main.rs"
+
+[dependencies]
+guirs = { path = "../../crates/guirs" }
+
+[build-dependencies]
+guirs-build.workspace = true
