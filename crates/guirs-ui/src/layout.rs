@@ -9,7 +9,7 @@
 //! "how tall is this string if it may be this wide".
 
 use guirs_core::{Bounds, Length, Point, Px, Size};
-use guirs_style::{
+use guirs_style::{GridLine, GridPlacement, TrackSize, 
     AlignItems, ComputedStyle, Display, FlexDirection, FlexWrap, JustifyContent, Overflow, Position,
 };
 use guirs_text::{LayoutOptions, RichText, TextStyle, TextSystem};
@@ -267,12 +267,44 @@ fn to_overflow(value: Overflow) -> taffy::Overflow {
     }
 }
 
+/// One row or column, in the form taffy takes.
+fn to_taffy_track(track: TrackSize) -> taffy::GridTemplateComponent<String> {
+    use taffy::style_helpers::*;
+    taffy::GridTemplateComponent::Single(match track {
+        TrackSize::Auto => auto(),
+        TrackSize::Px(value) => length(value.0),
+        TrackSize::Percent(fraction) => percent(fraction),
+        TrackSize::Fr(share) => fr(share),
+        TrackSize::MinContent => min_content(),
+        TrackSize::MaxContent => max_content(),
+    })
+}
+
+fn to_taffy_placement(placement: GridPlacement) -> taffy::GridPlacement {
+    match placement {
+        GridPlacement::Auto => taffy::GridPlacement::Auto,
+        // Zero is not a line in CSS, and taffy would read it as one, so it is
+        // treated as "wherever" rather than silently meaning line one.
+        GridPlacement::Line(0) => taffy::GridPlacement::Auto,
+        GridPlacement::Line(index) => taffy::GridPlacement::from_line_index(index),
+        GridPlacement::Span(tracks) => taffy::GridPlacement::from_span(tracks),
+    }
+}
+
+fn to_taffy_line(line: GridLine) -> taffy::Line<taffy::GridPlacement> {
+    taffy::Line {
+        start: to_taffy_placement(line.start),
+        end: to_taffy_placement(line.end),
+    }
+}
+
 /// Translate a computed style into taffy's own.
 pub fn to_taffy_style(style: &ComputedStyle) -> taffy::Style {
     taffy::Style {
         display: match style.display {
             Display::Flex => taffy::Display::Flex,
             Display::Block => taffy::Display::Block,
+            Display::Grid => taffy::Display::Grid,
             Display::None => taffy::Display::None,
         },
         position: match style.position {
@@ -344,6 +376,18 @@ pub fn to_taffy_style(style: &ComputedStyle) -> taffy::Style {
         },
         flex_grow: style.flex_grow,
         flex_shrink: style.flex_shrink,
+        grid_template_columns: style
+            .grid_template_columns
+            .as_ref()
+            .map(|tracks| tracks.iter().copied().map(to_taffy_track).collect())
+            .unwrap_or_default(),
+        grid_template_rows: style
+            .grid_template_rows
+            .as_ref()
+            .map(|tracks| tracks.iter().copied().map(to_taffy_track).collect())
+            .unwrap_or_default(),
+        grid_column: to_taffy_line(style.grid_column),
+        grid_row: to_taffy_line(style.grid_row),
         flex_basis: to_dimension(style.flex_basis),
         ..Default::default()
     }

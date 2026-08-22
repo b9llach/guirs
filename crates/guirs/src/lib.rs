@@ -68,7 +68,7 @@ pub use guirs_core::{
 // Styling
 // ---------------------------------------------------------------------------
 
-pub use guirs_style::{
+pub use guirs_style::{GridLine, GridPlacement, TrackSize, 
     AlignItems, AnimatableProperty, ComputedStyle, CursorStyle, Display, Easing, ElementDescriptor,
     FlexDirection, FlexWrap, FontFamily, FontStyle, FontWeight, JustifyContent, LineHeight,
     Overflow, ParseError, Position, Selector, Specificity, StateFlags, Style, StyleAnimator,
@@ -144,7 +144,7 @@ pub mod prelude {
         ResizeEdge, Rgba, RichText, ScrollEvent, SharedString, Size, SpanStyle, StateFlags, Style,
         Styled, Stylesheet, Text, TextAlign, TextInputState, TextSpan, Transform2D, Transition,
         Column, Dragged, Keymap, MenuItem, MenuState, ObjectFit, SortOrder, SplitState,
-        TableState, TreeNode, TreeState, TransitionTarget, WhiteSpace, Window,
+        TableState, TrackSize, TreeNode, TreeState, TransitionTarget, WhiteSpace, Window,
         WindowAction, WindowOptions,
     };
     pub use crate::{

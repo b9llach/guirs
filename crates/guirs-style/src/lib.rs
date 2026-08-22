@@ -38,7 +38,7 @@ pub use selector::{
 };
 pub use style::{ComputedStyle, ShadowList, Style, Styled, TransitionList};
 pub use transition::{Animated, StyleAnimator};
-pub use types::{
+pub use types::{GridLine, GridPlacement, TrackSize, 
     AlignItems, AnimatableProperty, CursorStyle, Display, Easing, FlexDirection, FlexWrap,
     FontFamily, FontStyle, FontWeight, JustifyContent, LineHeight, OrderedF32, Overflow,
     Position, TextAlign, TextDecoration, TextOverflow, Transition, TransitionTarget, WhiteSpace,

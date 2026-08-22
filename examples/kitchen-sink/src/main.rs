@@ -560,12 +560,39 @@ fn typography_section() -> Div {
 }
 
 fn layout_section(state: &State) -> Div {
+    fn cell(label: &str, wide: bool) -> Div {
+        div()
+            .class("grid-cell")
+            .class_if(wide, "wide")
+            .child(text(label.to_string()).whitespace_nowrap())
+    }
+
     fn block(color: u32, width: f32) -> Div {
         div().w(px(width)).h(px(34.0)).rounded(6.0).bg(rgb(color))
     }
 
     page()
-        .child(section("Layout", "Flexbox, the way a browser does it."))
+        .child(section("Layout", "Flexbox and grid, the way a browser does them."))
+        .child(
+            card()
+                .gap(12.0)
+                .child(text("Grid").class("section-title"))
+                .child(
+                    text("A fixed column and two shares of what is left. The first cell takes two columns.")
+                        .class("muted"),
+                )
+                .child(
+                    div()
+                        .grid()
+                        .grid_columns([TrackSize::Px(px(160.0)), TrackSize::Fr(1.0), TrackSize::Fr(2.0)])
+                        .gap(8.0)
+                        .child(cell("spans two", true).col_span(2))
+                        .child(cell("2fr", false))
+                        .child(cell("160px", false))
+                        .child(cell("1fr", false))
+                        .child(cell("2fr", false)),
+                ),
+        )
         .child(file_tree(state))
         .child(data_table(state))
         .child(reorderable(state))

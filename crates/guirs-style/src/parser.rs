@@ -852,6 +852,134 @@ fn parse_number(tokens: &[Token]) -> Option<f32> {
     }
 }
 
+/// Parse a list of grid tracks: `200px 1fr 2fr auto`.
+///
+/// `repeat(n, ...)` is expanded here rather than passed along, because the
+/// layout engine only takes repetitions whose every track has a fixed size and
+/// this way `repeat(3, 1fr)` works, which is most of what anybody writes.
+fn parse_tracks(tokens: &[Token]) -> Option<std::sync::Arc<[TrackSize]>> {
+    let mut out: Vec<TrackSize> = Vec::new();
+    for part in split_on_whitespace(tokens) {
+        let sig = significant(&part);
+        if sig.is_empty() {
+            continue;
+        }
+        // Given the part as it was written, not the significant tokens: the
+        // tracks inside a repetition are separated by the whitespace that
+        // stripping them would remove.
+        if let Some(expanded) = parse_repeat(&part) {
+            out.extend(expanded);
+            continue;
+        }
+        out.push(parse_track(&sig)?);
+    }
+    if out.is_empty() {
+        return None;
+    }
+    Some(out.into())
+}
+
+/// `repeat(3, 1fr)`, expanded into three tracks.
+fn parse_repeat(part: &[Token]) -> Option<Vec<TrackSize>> {
+    let TokenKind::Function(name) = &part.first()?.kind else {
+        return None;
+    };
+    if !name.eq_ignore_ascii_case("repeat") {
+        return None;
+    }
+    // Between the function's own parentheses, whitespace and all.
+    let inner: Vec<Token> = part[1..part.len().saturating_sub(1)].to_vec();
+    let args = split_on_commas(&inner);
+    if args.len() != 2 {
+        return None;
+    }
+    let count = parse_number(&args[0])?;
+    if !(1.0..=1024.0).contains(&count) {
+        return None;
+    }
+    let mut tracks = Vec::new();
+    for part in split_on_whitespace(&args[1]) {
+        let sig = significant(&part);
+        if !sig.is_empty() {
+            tracks.push(parse_track(&sig)?);
+        }
+    }
+    if tracks.is_empty() {
+        return None;
+    }
+    Some(
+        std::iter::repeat_n(tracks, count as usize)
+            .flatten()
+            .collect(),
+    )
+}
+
+fn parse_track(sig: &[&Token]) -> Option<TrackSize> {
+    if sig.len() != 1 {
+        return None;
+    }
+    Some(match &sig[0].kind {
+        TokenKind::Dimension(value, Unit::Fr) => TrackSize::Fr(*value),
+        TokenKind::Dimension(value, Unit::Px) => TrackSize::Px(Px(*value)),
+        TokenKind::Percentage(value) => TrackSize::Percent(*value),
+        TokenKind::Number(value) if *value == 0.0 => TrackSize::Px(Px::ZERO),
+        TokenKind::Ident(name) => match name.to_ascii_lowercase().as_str() {
+            "auto" => TrackSize::Auto,
+            "min-content" => TrackSize::MinContent,
+            "max-content" => TrackSize::MaxContent,
+            _ => return None,
+        },
+        _ => return None,
+    })
+}
+
+/// Parse `grid-column` and `grid-row`: `2`, `2 / 5`, `span 3`, `1 / span 2`.
+fn parse_grid_line(tokens: &[Token]) -> Option<GridLine> {
+    let halves = split_on_slash(tokens);
+    let start = parse_placement(&halves[0])?;
+    let end = match halves.get(1) {
+        Some(part) => parse_placement(part)?,
+        None => GridPlacement::Auto,
+    };
+    Some(GridLine { start, end })
+}
+
+fn parse_placement(tokens: &[Token]) -> Option<GridPlacement> {
+    let sig = significant(tokens);
+    match sig.len() {
+        0 => Some(GridPlacement::Auto),
+        1 => match &sig[0].kind {
+            TokenKind::Number(value) => Some(GridPlacement::Line(*value as i16)),
+            TokenKind::Ident(name) if name.eq_ignore_ascii_case("auto") => {
+                Some(GridPlacement::Auto)
+            }
+            _ => None,
+        },
+        2 => match (&sig[0].kind, &sig[1].kind) {
+            (TokenKind::Ident(name), TokenKind::Number(count))
+                if name.eq_ignore_ascii_case("span") =>
+            {
+                Some(GridPlacement::Span((*count).max(1.0) as u16))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Split on `/`, which separates the two ends of a grid placement.
+fn split_on_slash(tokens: &[Token]) -> Vec<Vec<Token>> {
+    let mut out = vec![Vec::new()];
+    for token in tokens {
+        if matches!(&token.kind, TokenKind::Delim('/')) {
+            out.push(Vec::new());
+        } else {
+            out.last_mut().expect("always one part").push(token.clone());
+        }
+    }
+    out
+}
+
 /// Parse a duration in either seconds or milliseconds, returning milliseconds.
 fn parse_duration_ms(tokens: &[Token]) -> Option<f32> {
     let sig = significant(tokens);
@@ -1429,6 +1557,7 @@ pub fn apply_declaration(
             match single_ident(value).as_deref() {
                 Some("flex") => Some(Display::Flex),
                 Some("block") => Some(Display::Block),
+                Some("grid") => Some(Display::Grid),
                 Some("none") => Some(Display::None),
                 _ => None,
             }
@@ -1464,6 +1593,10 @@ pub fn apply_declaration(
         "align-content" => set!(align_content, parse_justify(value)),
         "align-items" => set!(align_items, parse_align(value)),
         "align-self" => set!(align_self, parse_align(value)),
+        "grid-template-columns" => set!(grid_template_columns, parse_tracks(value)),
+        "grid-template-rows" => set!(grid_template_rows, parse_tracks(value)),
+        "grid-column" => set!(grid_column, parse_grid_line(value)),
+        "grid-row" => set!(grid_row, parse_grid_line(value)),
         "flex-grow" => set!(flex_grow, parse_number(value)),
         "flex-shrink" => set!(flex_shrink, parse_number(value)),
         "flex-basis" => set!(flex_basis, parse_length(value)),
@@ -1945,4 +2078,140 @@ fn parse_font_weight(tokens: &[Token]) -> Option<FontWeight> {
         "black" | "heavy" => FontWeight::BLACK,
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod grid_tests {
+    use super::*;
+
+    /// The style one declaration produces.
+    fn style_of(source: &str) -> Style {
+        let sheet = Stylesheet::parse(&format!("x {{ {source} }}"));
+        assert!(sheet.errors.is_empty(), "{:?}", sheet.errors);
+        assert_eq!(sheet.rules.len(), 1, "expected one rule");
+        (*sheet.rules[0].style).clone()
+    }
+
+    fn tracks(source: &str) -> Vec<TrackSize> {
+        style_of(source)
+            .grid_template_columns
+            .expect("no columns parsed")
+            .to_vec()
+    }
+
+    #[test]
+    fn a_row_of_tracks_reads_left_to_right() {
+        assert_eq!(
+            tracks("grid-template-columns: 200px 1fr 2fr auto;"),
+            [
+                TrackSize::Px(Px(200.0)),
+                TrackSize::Fr(1.0),
+                TrackSize::Fr(2.0),
+                TrackSize::Auto,
+            ]
+        );
+    }
+
+    #[test]
+    fn percentages_and_content_sizes_are_understood() {
+        assert_eq!(
+            tracks("grid-template-columns: 25% min-content max-content;"),
+            [
+                TrackSize::Percent(0.25),
+                TrackSize::MinContent,
+                TrackSize::MaxContent,
+            ]
+        );
+    }
+
+    #[test]
+    fn repeat_is_expanded_rather_than_passed_along() {
+        // The layout engine only takes repetitions whose every track has a
+        // fixed size, and `repeat(3, 1fr)` is most of what anybody writes.
+        assert_eq!(
+            tracks("grid-template-columns: repeat(3, 1fr);"),
+            [TrackSize::Fr(1.0), TrackSize::Fr(1.0), TrackSize::Fr(1.0)]
+        );
+    }
+
+    #[test]
+    fn repeat_can_hold_more_than_one_track() {
+        assert_eq!(
+            tracks("grid-template-columns: repeat(2, 100px 1fr);"),
+            [
+                TrackSize::Px(Px(100.0)),
+                TrackSize::Fr(1.0),
+                TrackSize::Px(Px(100.0)),
+                TrackSize::Fr(1.0),
+            ]
+        );
+    }
+
+    #[test]
+    fn repeat_sits_alongside_ordinary_tracks() {
+        assert_eq!(
+            tracks("grid-template-columns: 200px repeat(2, 1fr) auto;"),
+            [
+                TrackSize::Px(Px(200.0)),
+                TrackSize::Fr(1.0),
+                TrackSize::Fr(1.0),
+                TrackSize::Auto,
+            ]
+        );
+    }
+
+    #[test]
+    fn a_placement_can_be_a_line_a_range_or_a_span() {
+        assert_eq!(
+            style_of("grid-column: 2;").grid_column,
+            Some(GridLine {
+                start: GridPlacement::Line(2),
+                end: GridPlacement::Auto
+            })
+        );
+        assert_eq!(
+            style_of("grid-column: 2 / 5;").grid_column,
+            Some(GridLine::between(2, 5))
+        );
+        assert_eq!(
+            style_of("grid-column: span 3;").grid_column,
+            Some(GridLine::span(3))
+        );
+        assert_eq!(
+            style_of("grid-row: 1 / span 2;").grid_row,
+            Some(GridLine {
+                start: GridPlacement::Line(1),
+                end: GridPlacement::Span(2)
+            })
+        );
+    }
+
+    #[test]
+    fn a_line_counted_from_the_end_is_negative() {
+        assert_eq!(
+            style_of("grid-column: 1 / -1;").grid_column,
+            Some(GridLine::between(1, -1))
+        );
+    }
+
+    #[test]
+    fn display_grid_is_understood() {
+        assert_eq!(style_of("display: grid;").display, Some(Display::Grid));
+    }
+
+    #[test]
+    fn nonsense_is_refused_rather_than_guessed_at() {
+        for source in [
+            "grid-template-columns: 1flr;",
+            "grid-template-columns: sideways;",
+            "grid-column: sideways;",
+            "grid-column: span;",
+        ] {
+            let sheet = Stylesheet::parse(&format!("x {{ {source} }}"));
+            assert!(
+                !sheet.errors.is_empty(),
+                "{source:?} was accepted without complaint"
+            );
+        }
+    }
 }

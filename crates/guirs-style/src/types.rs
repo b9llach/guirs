@@ -17,8 +17,70 @@ pub enum Display {
     Flex,
     /// Children stack vertically and fill the width.
     Block,
+    /// Children are placed into rows and columns declared up front.
+    Grid,
     /// The element and its subtree are not laid out or painted.
     None,
+}
+
+/// How wide or tall one row or column of a grid is.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum TrackSize {
+    /// As big as what is in it.
+    #[default]
+    Auto,
+    /// A fixed size.
+    Px(crate::Px),
+    /// A share of the container.
+    Percent(f32),
+    /// A share of whatever is left after the fixed tracks have had theirs.
+    /// This is what makes a grid a grid rather than a table of fixed columns.
+    Fr(f32),
+    /// The smallest it can be without its contents overflowing.
+    MinContent,
+    /// As big as its contents would like to be.
+    MaxContent,
+}
+
+/// Where an item sits on one axis of a grid.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GridPlacement {
+    /// Wherever the grid puts it.
+    #[default]
+    Auto,
+    /// Against a numbered line. Lines are counted from one, and negative
+    /// numbers count back from the end, so `-1` is the last line.
+    Line(i16),
+    /// Across this many tracks, starting wherever the grid puts it.
+    Span(u16),
+}
+
+/// Where an item starts and ends on one axis of a grid.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GridLine {
+    pub start: GridPlacement,
+    pub end: GridPlacement,
+}
+
+impl GridLine {
+    /// Across this many tracks, starting wherever the grid puts it.
+    ///
+    /// The span goes on the start, which is what `grid-column: span 3` means
+    /// in CSS: begin somewhere and take three.
+    pub fn span(tracks: u16) -> Self {
+        GridLine {
+            start: GridPlacement::Span(tracks.max(1)),
+            end: GridPlacement::Auto,
+        }
+    }
+
+    /// From one line to another, the way `grid-column: 2 / 5` reads.
+    pub fn between(start: i16, end: i16) -> Self {
+        GridLine {
+            start: GridPlacement::Line(start),
+            end: GridPlacement::Line(end),
+        }
+    }
 }
 
 /// Whether an element participates in normal flow.

@@ -1462,6 +1462,97 @@ mod tests {
         assert_eq!(clicks.get(), 0, "the row under the scrollbar must not click");
     }
 
+    // -- grid --------------------------------------------------------------
+
+    use guirs_style::TrackSize;
+
+    #[test]
+    fn a_grid_places_children_into_its_columns() {
+        // Three columns: a fixed one and two shares of what is left. In a
+        // 500 wide grid that is 200, then 100 and 200 of the remaining 300.
+        let mut harness = Harness::new();
+        harness.size = Size::new(px_(500.0), px_(300.0));
+        harness.frame(
+            div()
+                .size_full()
+                .grid()
+                .grid_columns([
+                    TrackSize::Px(px_(200.0)),
+                    TrackSize::Fr(1.0),
+                    TrackSize::Fr(2.0),
+                ])
+                .child(div().h(px_(20.0)).id("a"))
+                .child(div().h(px_(20.0)).id("b"))
+                .child(div().h(px_(20.0)).id("c"))
+                .into_any(),
+        );
+
+        let widths: Vec<f32> = harness
+            .cx
+            .hits
+            .iter()
+            .filter(|region| region.bounds.size.height.0 == 20.0)
+            .map(|region| region.bounds.size.width.0)
+            .collect();
+        assert_eq!(widths.len(), 3, "not three cells: {widths:?}");
+        assert!((widths[0] - 200.0).abs() < 0.5, "{widths:?}");
+        assert!((widths[1] - 100.0).abs() < 0.5, "{widths:?}");
+        assert!((widths[2] - 200.0).abs() < 0.5, "{widths:?}");
+    }
+
+    #[test]
+    fn a_cell_can_take_more_than_one_column() {
+        let mut harness = Harness::new();
+        harness.size = Size::new(px_(600.0), px_(300.0));
+        harness.frame(
+            div()
+                .size_full()
+                .grid()
+                .grid_columns([TrackSize::Fr(1.0), TrackSize::Fr(1.0), TrackSize::Fr(1.0)])
+                .child(div().h(px_(20.0)).col_span(2))
+                .child(div().h(px_(20.0)))
+                .into_any(),
+        );
+
+        let widths: Vec<f32> = harness
+            .cx
+            .hits
+            .iter()
+            .filter(|region| region.bounds.size.height.0 == 20.0)
+            .map(|region| region.bounds.size.width.0)
+            .collect();
+        assert_eq!(widths.len(), 2, "not two cells: {widths:?}");
+        assert!((widths[0] - 400.0).abs() < 0.5, "the span was ignored: {widths:?}");
+        assert!((widths[1] - 200.0).abs() < 0.5, "{widths:?}");
+    }
+
+    #[test]
+    fn a_grid_wraps_onto_a_new_row_when_the_columns_run_out() {
+        let mut harness = Harness::new();
+        harness.size = Size::new(px_(400.0), px_(300.0));
+        harness.frame(
+            div()
+                .size_full()
+                .grid()
+                .grid_columns([TrackSize::Fr(1.0), TrackSize::Fr(1.0)])
+                .child(div().h(px_(20.0)))
+                .child(div().h(px_(20.0)))
+                .child(div().h(px_(20.0)))
+                .into_any(),
+        );
+
+        let tops: Vec<f32> = harness
+            .cx
+            .hits
+            .iter()
+            .filter(|region| region.bounds.size.height.0 == 20.0)
+            .map(|region| region.bounds.origin.y.0)
+            .collect();
+        assert_eq!(tops.len(), 3);
+        assert_eq!(tops[0], tops[1], "the first two are not on one row");
+        assert!(tops[2] > tops[0], "the third did not wrap onto a new row");
+    }
+
     // -- commands and key contexts ----------------------------------------
 
     #[test]

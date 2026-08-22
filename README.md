@@ -667,6 +667,35 @@ closes an open branch, and on something already closed steps out to whatever
 contains it, which is the nearest row above that is one level shallower rather
 than simply the row above.
 
+## Grid
+
+```rust
+div().grid()
+     .grid_columns([TrackSize::Px(px(200.0)), TrackSize::Fr(1.0), TrackSize::Fr(2.0)])
+     .child(header().col_span(3))
+     .child(sidebar())
+```
+
+or from the stylesheet:
+
+```css
+.dashboard {
+    display: grid;
+    grid-template-columns: 200px repeat(2, 1fr);
+    gap: 12px;
+}
+.dashboard .banner { grid-column: 1 / -1; }
+```
+
+Tracks can be a fixed size, a percentage, a share of what is left (`1fr`), or
+sized to their contents (`auto`, `min-content`, `max-content`). `repeat(n, ...)`
+is expanded when the stylesheet is read rather than passed along, so
+`repeat(3, 1fr)` works and so does `repeat(2, 100px 1fr)`.
+
+Items are placed automatically, or put where they are told with `grid-column`
+and `grid-row`: a line number, a range like `2 / 5`, a `span 3`, or `-1` to
+count back from the end.
+
 ## Tooltips
 
 ```rust
@@ -1045,8 +1074,6 @@ App::new().low_power()       // prefer the integrated GPU
 Stated plainly, because a framework that overstates its coverage is worse than
 one that does less:
 
-- **Grid layout.** Flexbox and block only. `taffy` supports grid, so this is
-  mostly a matter of parsing the template properties.
 - **Dashed and dotted borders.** They parse and round trip, but render solid.
 - **Group opacity.** `opacity` multiplies down the tree per element rather than
   compositing the subtree once, so overlapping translucent children show through

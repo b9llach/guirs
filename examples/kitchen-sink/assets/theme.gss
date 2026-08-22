@@ -637,3 +637,18 @@ tooltip {
     font-size: 12px;
     box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
 }
+
+.grid-cell {
+    padding: 14px 12px;
+    border-radius: 7px;
+    background: var(--surface-high);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.grid-cell.wide {
+    background: var(--primary);
+    color: var(--text-bright);
+    border-color: var(--primary-high);
+}

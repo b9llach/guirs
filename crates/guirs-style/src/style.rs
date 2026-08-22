@@ -58,6 +58,14 @@ pub struct Style {
     pub align_content: Option<JustifyContent>,
     pub row_gap: Option<Length>,
     pub column_gap: Option<Length>,
+    /// The columns a grid declares. Shared rather than owned, because a style
+    /// is cloned onto every element that matches it and a list of tracks is
+    /// the same list every time.
+    pub grid_template_columns: Option<std::sync::Arc<[TrackSize]>>,
+    pub grid_template_rows: Option<std::sync::Arc<[TrackSize]>>,
+    /// Where this item sits, for an item inside a grid.
+    pub grid_column: Option<GridLine>,
+    pub grid_row: Option<GridLine>,
     pub overflow_x: Option<Overflow>,
     pub overflow_y: Option<Overflow>,
 
@@ -152,6 +160,10 @@ impl Style {
             align_content,
             row_gap,
             column_gap,
+            grid_template_columns,
+            grid_template_rows,
+            grid_column,
+            grid_row,
             overflow_x,
             overflow_y,
             background,
@@ -266,6 +278,13 @@ impl Style {
                 width: resolve_len(self.column_gap, Length::Px(Px::ZERO)),
                 height: resolve_len(self.row_gap, Length::Px(Px::ZERO)),
             },
+            // Not inherited: a grid inside a grid declares its own tracks, and
+            // taking the enclosing one's would be silently wrong rather than
+            // merely unhelpful.
+            grid_template_columns: self.grid_template_columns.clone(),
+            grid_template_rows: self.grid_template_rows.clone(),
+            grid_column: self.grid_column.unwrap_or_default(),
+            grid_row: self.grid_row.unwrap_or_default(),
             overflow_x: self.overflow_x.unwrap_or_default(),
             overflow_y: self.overflow_y.unwrap_or_default(),
 
@@ -346,6 +365,10 @@ pub struct ComputedStyle {
     pub align_content: JustifyContent,
     /// `width` is the column gap, `height` the row gap.
     pub gap: Size<Length>,
+    pub grid_template_columns: Option<std::sync::Arc<[TrackSize]>>,
+    pub grid_template_rows: Option<std::sync::Arc<[TrackSize]>>,
+    pub grid_column: GridLine,
+    pub grid_row: GridLine,
     pub overflow_x: Overflow,
     pub overflow_y: Overflow,
 
@@ -424,6 +447,10 @@ impl Default for ComputedStyle {
                 width: Length::Px(Px::ZERO),
                 height: Length::Px(Px::ZERO),
             },
+            grid_template_columns: None,
+            grid_template_rows: None,
+            grid_column: GridLine::default(),
+            grid_row: GridLine::default(),
             overflow_x: Overflow::Visible,
             overflow_y: Overflow::Visible,
 
@@ -571,6 +598,59 @@ pub trait Styled: Sized {
     fn grow(mut self, value: f32) -> Self {
         self.style_mut().flex_grow = Some(value);
         self
+    }
+
+    /// Lay children out in rows and columns declared up front.
+    ///
+    /// ```
+    /// # use guirs_style::{Styled, Style, TrackSize};
+    /// # use guirs_core::Px;
+    /// Style::new().grid().grid_columns([
+    ///     TrackSize::Px(Px(200.0)),
+    ///     TrackSize::Fr(1.0),
+    ///     TrackSize::Fr(2.0),
+    /// ]);
+    /// ```
+    fn grid(mut self) -> Self {
+        self.style_mut().display = Some(Display::Grid);
+        self
+    }
+
+    /// The columns this grid has.
+    fn grid_columns(mut self, tracks: impl IntoIterator<Item = TrackSize>) -> Self {
+        self.style_mut().grid_template_columns = Some(tracks.into_iter().collect());
+        self
+    }
+
+    /// The rows this grid has.
+    ///
+    /// A grid with columns but no rows makes rows as it needs them, which is
+    /// usually what a list of things in columns wants.
+    fn grid_rows(mut self, tracks: impl IntoIterator<Item = TrackSize>) -> Self {
+        self.style_mut().grid_template_rows = Some(tracks.into_iter().collect());
+        self
+    }
+
+    /// Where this item sits across the grid.
+    fn grid_column(mut self, line: GridLine) -> Self {
+        self.style_mut().grid_column = Some(line);
+        self
+    }
+
+    /// Where this item sits down the grid.
+    fn grid_row(mut self, line: GridLine) -> Self {
+        self.style_mut().grid_row = Some(line);
+        self
+    }
+
+    /// Take this many columns, wherever the grid puts this item.
+    fn col_span(self, tracks: u16) -> Self {
+        self.grid_column(GridLine::span(tracks))
+    }
+
+    /// Take this many rows.
+    fn row_span(self, tracks: u16) -> Self {
+        self.grid_row(GridLine::span(tracks))
     }
 
     fn shrink(mut self, value: f32) -> Self {
