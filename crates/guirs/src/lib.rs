@@ -116,6 +116,7 @@ pub use guirs_ui::menu::{
     context_menu, menu_bar, menu_item, menu_separator, submenu, MenuItem, MenuState,
 };
 pub use guirs_ui::split::{split, split_x, split_y, SplitState};
+pub use guirs_ui::drag::{DragState, Dragged};
 
 pub use guirs_ui::impl_into_element;
 
@@ -140,7 +141,7 @@ pub mod prelude {
         Length, LineHeight, Model, Modifiers, MouseButton, MouseEvent, Overflow, Paint, Point, Px,
         ResizeEdge, Rgba, RichText, ScrollEvent, SharedString, Size, SpanStyle, StateFlags, Style,
         Styled, Stylesheet, Text, TextAlign, TextInputState, TextSpan, Transform2D, Transition,
-        Keymap, MenuItem, MenuState, ObjectFit, SplitState, TransitionTarget, WhiteSpace, Window,
+        Dragged, Keymap, MenuItem, MenuState, ObjectFit, SplitState, TransitionTarget, WhiteSpace, Window,
         WindowAction, WindowOptions,
     };
     pub use crate::{

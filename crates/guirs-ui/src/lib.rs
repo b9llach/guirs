@@ -68,6 +68,7 @@ pub mod chrome;
 pub mod context;
 pub mod dialog;
 pub mod div;
+pub mod drag;
 pub mod element;
 pub mod event;
 pub mod icon;

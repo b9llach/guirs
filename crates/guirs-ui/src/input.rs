@@ -158,6 +158,18 @@ impl InputRouter {
                 cx.input.mouse_inside = true;
                 cx.input.modifiers = mouse.modifiers;
 
+                // Follow whatever is being carried, and work out where it
+                // would land. Done before anything else claims the move: a
+                // drag under way owns the pointer until it is let go.
+                if cx.input.drag.moved(mouse.position) {
+                    let target = drop_target_at(cx, mouse.position);
+                    if cx.input.drop_target != target {
+                        cx.input.drop_target = target;
+                    }
+                    out.redraw = true;
+                    return out;
+                }
+
                 if self.scrollbar_grab.is_some() {
                     self.drag_scrollbar(cx, mouse.position, &mut out);
                 } else if let Some(id) = self.editing {
@@ -233,6 +245,19 @@ impl InputRouter {
                 let chain = cx.chain_at(mouse.position);
                 self.press_chain = chain.clone();
                 cx.input.active = chain.iter().map(|region| region.id).collect();
+
+                // Noted rather than started. Whether this press is a drag or a
+                // click is not known until the pointer either moves or does
+                // not, so both stay possible until then.
+                if mouse.button == Some(MouseButton::Left) {
+                    if let Some((id, kind, value)) = chain.iter().find_map(|region| {
+                        let handlers = cx.handlers.get(&region.id)?;
+                        let (kind, value) = handlers.draggable.as_ref()?;
+                        Some((region.id, kind.clone(), value.clone()))
+                    }) {
+                        cx.input.drag.press(kind, value, id, mouse.position);
+                    }
+                }
 
                 // Focus goes to the nearest focusable element in the chain, not
                 // to whatever happens to be innermost. A press on a text
@@ -312,6 +337,22 @@ impl InputRouter {
                 if self.scrollbar_grab.take().is_some() {
                     return out;
                 }
+
+                // A drag that was under way ends here rather than becoming a
+                // click. Releasing over nothing that accepts it drops nothing,
+                // which is how a drag is cancelled.
+                if let Some(dropped) = cx.input.drag.release() {
+                    let target = cx.input.drop_target.take();
+                    if let Some(target) = target {
+                        deliver_drop(cx, target, &dropped, &mut out);
+                    }
+                    self.press_chain.clear();
+                    cx.input.active.clear();
+                    out.redraw = true;
+                    return out;
+                }
+                cx.input.drag.cancel();
+                cx.input.drop_target = None;
 
                 let release = cx.chain_at(mouse.position);
                 dispatch(cx, &release, mouse, Phase::Up, &mut out);
@@ -762,6 +803,55 @@ impl InputRouter {
 
 /// Send a pointer event along a chain, innermost first, until something stops
 /// it.
+/// The nearest element under the pointer that accepts what is being carried.
+///
+/// Innermost first, so a target inside another gets the drop. A target that
+/// does not accept this kind is passed over entirely rather than blocking the
+/// one behind it, which is what lets a list of tabs sit inside a pane that
+/// also accepts drops.
+fn drop_target_at(cx: &Cx, position: Point<Px>) -> Option<GlobalElementId> {
+    let kind = match cx.input.drag.dragged() {
+        Some(dragged) => dragged.kind.clone(),
+        None => return None,
+    };
+    cx.chain_at(position).iter().find_map(|region| {
+        let handlers = cx.handlers.get(&region.id)?;
+        handlers
+            .on_drop
+            .iter()
+            .any(|(accepts, _)| *accepts == kind)
+            .then_some(region.id)
+    })
+}
+
+/// Hand what was carried to the element it was dropped on.
+fn deliver_drop(
+    cx: &mut Cx,
+    target: GlobalElementId,
+    dropped: &crate::drag::Dragged,
+    out: &mut Outcome,
+) {
+    let Some(handlers) = cx.handlers.get(&target) else {
+        return;
+    };
+    let handler = handlers
+        .on_drop
+        .iter()
+        .find(|(accepts, _)| *accepts == dropped.kind)
+        .map(|(_, handler)| handler.clone());
+    let Some(handler) = handler else {
+        return;
+    };
+
+    let mut context = EventContext::new(
+        &mut cx.input,
+        &mut cx.state,
+        &mut out.redraw,
+        &mut out.quit,
+    );
+    handler(dropped, &mut context);
+}
+
 fn dispatch(
     cx: &mut Cx,
     chain: &[HitRegion],
@@ -1353,6 +1443,157 @@ mod tests {
     }
 
     // -- commands and key contexts ----------------------------------------
+
+    // -- dragging inside the window ---------------------------------------
+
+    /// A source on the left and a target on the right, reporting what landed.
+    fn drag_harness(landed: Model<String>) -> Harness {
+        let mut harness = Harness::new();
+        harness.frame(
+            div()
+                .size_full()
+                .child(
+                    div()
+                        .absolute()
+                        .left(px_(0.0))
+                        .top(px_(0.0))
+                        .size(px_(100.0))
+                        .draggable("tab", 7usize),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .left(px_(200.0))
+                        .top(px_(0.0))
+                        .size(px_(100.0))
+                        .on_drop("tab", move |dropped, _| {
+                            let value = dropped.value::<usize>().copied().unwrap_or(0);
+                            landed.set(format!("tab {value}"));
+                        }),
+                )
+                .into_any(),
+        );
+        harness
+    }
+
+    #[test]
+    fn dragging_something_onto_a_target_delivers_it() {
+        let landed = Model::new(String::new());
+        let mut harness = drag_harness(landed.clone());
+
+        harness.press(50.0, 50.0);
+        harness.drag_to(150.0, 50.0);
+        harness.drag_to(250.0, 50.0);
+        harness.release(250.0, 50.0);
+
+        assert_eq!(landed.get(), "tab 7");
+    }
+
+    #[test]
+    fn clicking_something_draggable_is_still_a_click() {
+        // A press and release without movement has to stay a click, or
+        // anything draggable stops being clickable.
+        let clicked = Model::new(false);
+        let saw = clicked.clone();
+
+        let mut harness = Harness::new();
+        harness.frame(
+            div()
+                .size_full()
+                .child(
+                    div()
+                        .size(px_(100.0))
+                        .draggable("tab", 1usize)
+                        .on_click(move |_, _| saw.set(true)),
+                )
+                .into_any(),
+        );
+
+        harness.click(50.0, 50.0);
+        assert!(clicked.get(), "a draggable element stopped being clickable");
+    }
+
+    #[test]
+    fn dropping_somewhere_that_accepts_nothing_delivers_nothing() {
+        let landed = Model::new(String::new());
+        let mut harness = drag_harness(landed.clone());
+
+        harness.press(50.0, 50.0);
+        harness.drag_to(150.0, 50.0);
+        // Let go over empty space rather than over the target.
+        harness.release(150.0, 150.0);
+
+        assert_eq!(landed.get(), "", "something was delivered to nowhere");
+    }
+
+    #[test]
+    fn a_target_ignores_a_kind_it_does_not_accept() {
+        let landed = Model::new(String::new());
+        let saw = landed.clone();
+
+        let mut harness = Harness::new();
+        harness.frame(
+            div()
+                .size_full()
+                .child(
+                    div()
+                        .absolute()
+                        .left(px_(0.0))
+                        .top(px_(0.0))
+                        .size(px_(100.0))
+                        .draggable("file", 1usize),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .left(px_(200.0))
+                        .top(px_(0.0))
+                        .size(px_(100.0))
+                        .on_drop("tab", move |_, _| saw.set("wrong".into())),
+                )
+                .into_any(),
+        );
+
+        harness.press(50.0, 50.0);
+        harness.drag_to(250.0, 50.0);
+        harness.release(250.0, 50.0);
+        assert_eq!(landed.get(), "", "a target took something it does not accept");
+    }
+
+    #[test]
+    fn what_is_carried_and_where_it_would_land_are_both_known() {
+        // Both are what the stylesheet matches on, so both have to be right
+        // while the drag is happening rather than only at the end.
+        let landed = Model::new(String::new());
+        let mut harness = drag_harness(landed);
+
+        harness.press(50.0, 50.0);
+        harness.drag_to(250.0, 50.0);
+
+        assert!(harness.cx.input.drag.is_active());
+        assert!(
+            harness.cx.input.drop_target.is_some(),
+            "over the target and nothing was marked"
+        );
+
+        harness.drag_to(150.0, 150.0);
+        assert!(
+            harness.cx.input.drop_target.is_none(),
+            "the mark stayed behind after the pointer left"
+        );
+    }
+
+    #[test]
+    fn a_drag_leaves_nothing_behind_when_it_ends() {
+        let landed = Model::new(String::new());
+        let mut harness = drag_harness(landed);
+        harness.press(50.0, 50.0);
+        harness.drag_to(250.0, 50.0);
+        harness.release(250.0, 50.0);
+
+        assert!(!harness.cx.input.drag.is_active());
+        assert!(harness.cx.input.drop_target.is_none());
+    }
 
     #[test]
     fn a_command_reaches_the_element_that_answers_it() {

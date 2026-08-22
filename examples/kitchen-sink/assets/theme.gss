@@ -526,3 +526,23 @@ textarea:focus { border-color: var(--primary); }
     background: var(--surface);
     padding: 12px;
 }
+
+/* --------------------------------------------------------------------------
+   Reordering
+   -------------------------------------------------------------------------- */
+
+.reorder-row {
+    padding: 9px 12px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--surface-high);
+    color: var(--text);
+    transition: background var(--speed) ease-out, border-color var(--speed) ease-out;
+}
+
+.reorder-row:hover { border-color: var(--border-high); }
+/* The row being carried, and the row it would land on. */
+.reorder-row:dragging { color: var(--text-muted); border-style: dashed; }
+.reorder-row:drag-over { border-color: var(--primary); background: var(--overlay); }
+
+.reorder-grip { color: var(--text-muted); }

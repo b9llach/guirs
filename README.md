@@ -640,6 +640,39 @@ entry announces its own name and offers its shortcut as a shortcut rather than
 as part of the name, so a reader says "New" and offers Ctrl+N, rather than
 reading out "New Ctrl plus N" as though that were what it was called.
 
+## Dragging inside the window
+
+A different thing from files arriving from the desktop: nothing leaves the
+process, so what travels is a value rather than a path.
+
+```rust
+div().draggable("row", index)
+     .on_drop("row", move |dropped, cx| {
+         if let Some(from) = dropped.value::<usize>() {
+             reorder(*from, index);
+             cx.request_redraw();
+         }
+     })
+```
+
+A drag is named, and a target says which name it accepts. A tab dropped on a
+file tree does nothing rather than something surprising, and neither side has
+to know what the other is. The value is carried as itself, so a target that
+recognises the name asks for the type it expects and is told if it is wrong.
+
+A press is not a drag until the pointer has moved far enough to mean it, so
+anything draggable can still be clicked. Letting go over nothing that accepts
+what is being carried drops nothing, which is how a drag is cancelled.
+
+While it is happening, the thing being carried matches `:dragging` and the
+place it would land matches `:drag-over`, so both can be shown without an
+application tracking either:
+
+```css
+.row:dragging  { border-style: dashed; }
+.row:drag-over { border-color: var(--primary); }
+```
+
 ## Split panes
 
 ```rust
@@ -979,8 +1012,9 @@ one that does less:
 - **Dialogs drawn in the window.** The file and message dialogs are the
   platform's own, which is the right default and not always the right answer:
   an application wanting a sheet that matches its own chrome has to build one.
-- **Dragging out of the window.** Files can be dropped onto a window; starting
-  a drag from one is not implemented.
+- **Dragging out of the window.** Files can be dropped onto a window, and
+  things can be dragged around inside one, but starting a drag that leaves the
+  window is not implemented.
 - **Reading inside a text field.** A field reports its name and its whole
   value, so a reader announces it and reads it back. Navigating it by character,
   word or line, and following the caret while doing so, needs the text range

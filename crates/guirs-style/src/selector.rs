@@ -38,6 +38,10 @@ impl StateFlags {
     pub const OPEN: StateFlags = StateFlags(1 << 7);
     /// Focus arrived from the keyboard rather than the pointer.
     pub const FOCUS_VISIBLE: StateFlags = StateFlags(1 << 8);
+    /// Something is being dragged and would be dropped here.
+    pub const DRAG_OVER: StateFlags = StateFlags(1 << 9);
+    /// This is the thing being dragged.
+    pub const DRAGGING: StateFlags = StateFlags(1 << 10);
 
     #[inline]
     pub fn contains(self, other: StateFlags) -> bool {
@@ -128,6 +132,10 @@ pub enum PseudoClass {
     LastChild,
     OnlyChild,
     Empty,
+    /// Something is being dragged and would be dropped here.
+    DragOver,
+    /// This is the thing being dragged.
+    Dragging,
     /// Negation. The argument is a single compound selector.
     Not(Box<CompoundSelector>),
 }
@@ -145,6 +153,8 @@ impl PseudoClass {
             "checked" => PseudoClass::Checked,
             "selected" => PseudoClass::Selected,
             "open" => PseudoClass::Open,
+            "drag-over" => PseudoClass::DragOver,
+            "dragging" => PseudoClass::Dragging,
             "root" => PseudoClass::Root,
             "first-child" => PseudoClass::FirstChild,
             "last-child" => PseudoClass::LastChild,
@@ -166,6 +176,8 @@ impl PseudoClass {
             PseudoClass::Checked => el.state.contains(StateFlags::CHECKED),
             PseudoClass::Selected => el.state.contains(StateFlags::SELECTED),
             PseudoClass::Open => el.state.contains(StateFlags::OPEN),
+            PseudoClass::DragOver => el.state.contains(StateFlags::DRAG_OVER),
+            PseudoClass::Dragging => el.state.contains(StateFlags::DRAGGING),
             PseudoClass::Root => el.is_root,
             PseudoClass::FirstChild => el.child_index == 0,
             PseudoClass::LastChild => {
@@ -207,6 +219,8 @@ impl fmt::Display for PseudoClass {
             PseudoClass::Checked => "checked",
             PseudoClass::Selected => "selected",
             PseudoClass::Open => "open",
+            PseudoClass::DragOver => "drag-over",
+            PseudoClass::Dragging => "dragging",
             PseudoClass::Root => "root",
             PseudoClass::FirstChild => "first-child",
             PseudoClass::LastChild => "last-child",

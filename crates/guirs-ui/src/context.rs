@@ -44,6 +44,9 @@ pub struct CommandOutcome {
     pub quit: bool,
 }
 
+/// A handler for something dropped on an element.
+pub type DropHandler = Rc<dyn Fn(&crate::drag::Dragged, &mut EventContext)>;
+
 /// A handler for a named command, which carries nothing but its own name.
 pub type CommandHandler = Rc<dyn Fn(&mut EventContext)>;
 /// A handler for wheel and trackpad events.
@@ -69,6 +72,10 @@ pub struct Handlers {
     /// Called while files are over this element, and again with an empty list
     /// when they leave, so a drop target can light up and go dark again.
     pub on_file_hover: Option<FileDropHandler>,
+    /// What this element can be picked up as, and what it carries.
+    pub draggable: Option<(SharedString, Rc<dyn std::any::Any>)>,
+    /// What this element accepts a drop of, and what to do with it.
+    pub on_drop: Vec<(SharedString, DropHandler)>,
     /// Commands this element answers, by name.
     ///
     /// A command travels outwards from whatever has focus until something
@@ -83,6 +90,8 @@ impl Handlers {
             && self.on_mouse_down.is_none()
             && self.on_mouse_up.is_none()
             && self.on_mouse_move.is_none()
+            && self.draggable.is_none()
+            && self.on_drop.is_empty()
             && self.on_command.is_empty()
             && self.on_scroll.is_none()
             && self.on_key_down.is_none()
@@ -382,6 +391,14 @@ pub struct InputState {
     /// button is its label. `button:active` still has to match, so the whole
     /// chain counts as active, exactly as hover does.
     pub active: SmallVec<[GlobalElementId; 8]>,
+    /// What is being carried, and where it would land.
+    ///
+    /// Held here with hover and focus because it is the same kind of thing:
+    /// a fact about the pointer that outlives any one event and decides how
+    /// elements look on the next frame.
+    pub drag: crate::drag::DragState,
+    /// The element a drop would go to right now, if one would.
+    pub drop_target: Option<GlobalElementId>,
     pub focused: Option<GlobalElementId>,
     /// Whether focus arrived from the keyboard, which decides whether a focus
     /// ring is drawn.
@@ -406,6 +423,11 @@ impl InputState {
         flags.set(StateFlags::FOCUS, focused);
         flags.set(StateFlags::FOCUS_VISIBLE, focused && self.focus_visible);
         flags.set(StateFlags::FOCUS_WITHIN, focused || focus_within);
+        flags.set(
+            StateFlags::DRAGGING,
+            self.drag.dragged().is_some_and(|d| d.from == id),
+        );
+        flags.set(StateFlags::DRAG_OVER, self.drop_target == Some(id));
         flags
     }
 

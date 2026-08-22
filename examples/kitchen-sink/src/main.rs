@@ -32,6 +32,7 @@ struct State {
     last_command: Model<String>,
     split_outer: Model<SplitState>,
     split_inner: Model<SplitState>,
+    order: Model<Vec<String>>,
 }
 
 impl State {
@@ -55,6 +56,11 @@ impl State {
             last_command: Model::new(String::from("nothing yet")),
             split_outer: Model::new(SplitState::new(200.0).range(120.0, 420.0)),
             split_inner: Model::new(SplitState::new(150.0).range(60.0, 300.0)),
+            order: Model::new(
+                ["Alpha", "Bravo", "Charlie", "Delta"]
+                    .map(String::from)
+                    .to_vec(),
+            ),
         }
     }
 }
@@ -322,6 +328,50 @@ fn components_section(state: &State) -> Div {
         })
 }
 
+/// A list whose rows can be picked up and dropped on each other.
+///
+/// The canonical use for dragging inside a window, and the one every other
+/// use is a variation of: what is carried is a position, and what receives it
+/// works out where that position should end up.
+fn reorderable(state: &State) -> Div {
+    let items = state.order.read().clone();
+    let mut list = column().gap(6.0);
+
+    for (index, label) in items.iter().enumerate() {
+        let order = state.order.clone();
+        list = list.child(
+            div()
+                .class("reorder-row")
+                .row()
+                .items_center()
+                .gap(10.0)
+                .cursor(CursorStyle::Grab)
+                .draggable("row", index)
+                .on_drop("row", move |dropped, cx| {
+                    let Some(from) = dropped.value::<usize>().copied() else {
+                        return;
+                    };
+                    if from == index {
+                        return;
+                    }
+                    order.update(|items| {
+                        let moved = items.remove(from);
+                        items.insert(index.min(items.len()), moved);
+                    });
+                    cx.request_redraw();
+                })
+                .child(text("\u{2261}").class("reorder-grip").decorative())
+                .child(text(label.clone()).whitespace_nowrap()),
+        );
+    }
+
+    card()
+        .gap(12.0)
+        .child(text("Reordering").class("section-title"))
+        .child(text("Drag a row onto another to move it there.").class("muted"))
+        .child(list)
+}
+
 fn typography_section() -> Div {
     let sizes: [(&str, f32, FontWeight); 5] = [
         ("Display", 30.0, FontWeight::SEMIBOLD),
@@ -421,6 +471,7 @@ fn layout_section(state: &State) -> Div {
                     text("Drag either divider. Nested, so the right hand side is itself split.")
                         .class("muted"),
                 )
+                .child(reorderable(state))
                 .child(
                     div().class("split-demo").child(split_x(
                         state.split_outer.clone(),

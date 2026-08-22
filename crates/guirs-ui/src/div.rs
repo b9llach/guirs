@@ -202,6 +202,43 @@ impl Div {
         self
     }
 
+    /// Let this be picked up and carried.
+    ///
+    /// `kind` is what it is, so a target can accept some things and not
+    /// others. `value` is whatever the target will need: an index, an
+    /// identifier, the thing itself.
+    ///
+    /// A press is not a drag until the pointer has moved far enough to mean
+    /// it, so a draggable element can still be clicked.
+    ///
+    /// ```
+    /// # use guirs_ui::div::div;
+    /// div().draggable("tab", 3usize);
+    /// ```
+    pub fn draggable(mut self, kind: impl Into<SharedString>, value: impl std::any::Any) -> Self {
+        self.handlers.draggable = Some((kind.into(), std::rc::Rc::new(value)));
+        self
+    }
+
+    /// Accept something dropped here.
+    ///
+    /// Only things of the named kind. Anything else passes over as though this
+    /// element were not a target at all, which is what stops a tab being
+    /// dropped into a file tree.
+    ///
+    /// While a matching drag is over it, the element matches `:drag-over`, and
+    /// whatever is being carried matches `:dragging`.
+    pub fn on_drop(
+        mut self,
+        kind: impl Into<SharedString>,
+        handler: impl Fn(&crate::drag::Dragged, &mut crate::EventContext) + 'static,
+    ) -> Self {
+        self.handlers
+            .on_drop
+            .push((kind.into(), std::rc::Rc::new(handler)));
+        self
+    }
+
     /// Answer a command, whether it came from a key, a menu or anywhere else.
     ///
     /// A command travels outwards from whatever has focus until something
