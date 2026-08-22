@@ -502,3 +502,27 @@ textarea:focus { border-color: var(--primary); }
     background: var(--border);
     margin: 4px 6px 4px 6px;
 }
+
+/* --------------------------------------------------------------------------
+   Split panes
+   -------------------------------------------------------------------------- */
+
+.split-divider {
+    background: var(--border);
+    transition: background var(--speed) ease-out;
+}
+
+.split-divider:hover { background: var(--primary); }
+.split-divider.dragging { background: var(--primary-high); }
+
+.split-demo {
+    height: 260px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.split-demo .split-pane {
+    background: var(--surface);
+    padding: 12px;
+}

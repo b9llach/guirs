@@ -47,6 +47,8 @@ pub enum AccessRole {
     ScrollView,
     Image,
     Link,
+    /// The draggable boundary between two panes.
+    Splitter,
 }
 
 impl AccessRole {

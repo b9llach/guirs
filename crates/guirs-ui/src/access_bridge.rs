@@ -40,6 +40,7 @@ fn to_accesskit(role: AccessRole) -> Role {
         AccessRole::ScrollView => Role::ScrollView,
         AccessRole::Image => Role::Image,
         AccessRole::Link => Role::Link,
+        AccessRole::Splitter => Role::Splitter,
     }
 }
 

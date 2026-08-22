@@ -74,6 +74,7 @@ pub mod icon;
 pub mod image;
 pub mod keymap;
 pub mod menu;
+pub mod split;
 pub mod input;
 pub mod layout;
 pub mod model;

@@ -30,6 +30,8 @@ struct State {
     /// What the last command asked for, so choosing one visibly does
     /// something rather than being taken on faith.
     last_command: Model<String>,
+    split_outer: Model<SplitState>,
+    split_inner: Model<SplitState>,
 }
 
 impl State {
@@ -51,6 +53,8 @@ impl State {
             clicks: Model::new(0),
             menus: Model::new(MenuState::default()),
             last_command: Model::new(String::from("nothing yet")),
+            split_outer: Model::new(SplitState::new(200.0).range(120.0, 420.0)),
+            split_inner: Model::new(SplitState::new(150.0).range(60.0, 300.0)),
         }
     }
 }
@@ -245,7 +249,7 @@ fn content(state: &State) -> Div {
         0 => overview_section(state),
         1 => components_section(state),
         2 => typography_section(),
-        3 => layout_section(),
+        3 => layout_section(state),
         4 => motion_section(),
         _ => settings_section(state),
     }
@@ -402,13 +406,42 @@ fn typography_section() -> Div {
         )
 }
 
-fn layout_section() -> Div {
+fn layout_section(state: &State) -> Div {
     fn block(color: u32, width: f32) -> Div {
         div().w(px(width)).h(px(34.0)).rounded(6.0).bg(rgb(color))
     }
 
     page()
         .child(section("Layout", "Flexbox, the way a browser does it."))
+        .child(
+            card()
+                .gap(12.0)
+                .child(text("Split panes").class("section-title"))
+                .child(
+                    text("Drag either divider. Nested, so the right hand side is itself split.")
+                        .class("muted"),
+                )
+                .child(
+                    div().class("split-demo").child(split_x(
+                        state.split_outer.clone(),
+                        column()
+                            .gap(6.0)
+                            .child(text("Sidebar").class("section-title"))
+                            .child(text("Fixed width, kept when the window resizes.").class("muted small")),
+                        split_y(
+                            state.split_inner.clone(),
+                            column()
+                                .gap(6.0)
+                                .child(text("Editor").class("section-title"))
+                                .child(text("Takes whatever is left over.").class("muted small")),
+                            column()
+                                .gap(6.0)
+                                .child(text("Panel").class("section-title"))
+                                .child(text("Dragged up and down.").class("muted small")),
+                        ),
+                    )),
+                ),
+        )
         .child(
             card()
                 .gap(12.0)

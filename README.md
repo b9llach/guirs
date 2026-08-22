@@ -640,6 +640,33 @@ entry announces its own name and offers its shortcut as a shortcut rather than
 as part of the name, so a reader says "New" and offers Ctrl+N, rather than
 reading out "New Ctrl plus N" as though that were what it was called.
 
+## Split panes
+
+```rust
+split_x(sidebar_width, file_tree(), split_y(panel_height, editor(), terminal()))
+```
+
+Two panes and a divider you can drag. Nest them and you have the layout an
+editor or a set of developer tools is made of, every boundary movable.
+
+The first pane is measured in pixels and the second takes what is left. That is
+deliberate: a sidebar should stay the width somebody dragged it to when the
+window is resized, rather than growing in proportion and having to be dragged
+back. `SplitState::new(240.0).range(150.0, 500.0)` gives it a size and limits,
+and a pane without limits can be dragged shut by accident.
+
+The divider is wider to the pointer than it looks, because a hairline is what
+it should look like and is close to impossible to grab. It reports itself as a
+splitter, so a screen reader finds it and says what it is for.
+
+Three things a splitter has to say out loud, all of which are flexbox defaults
+working against it: the first pane must not shrink, or content in the second
+one squeezes it and the divider stops short of where it was dragged; the
+divider must not shrink, or it is the first thing squeezed and quietly
+vanishes; and both panes must be allowed to shrink below their content, or the
+divider stops early and looks stuck. All three are set here so an application
+does not have to know about any of them.
+
 ## Shipping an application
 
 Two things separate a program that runs from one that looks like it belongs on
