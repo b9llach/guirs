@@ -546,3 +546,34 @@ textarea:focus { border-color: var(--primary); }
 .reorder-row:drag-over { border-color: var(--primary); background: var(--overlay); }
 
 .reorder-grip { color: var(--text-muted); }
+
+/* --------------------------------------------------------------------------
+   Tree
+   -------------------------------------------------------------------------- */
+
+.tree {
+    gap: 1px;
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+}
+
+.tree-row {
+    padding: 4px 8px;
+    border-radius: 5px;
+    color: var(--text);
+    font-size: 13px;
+    gap: 4px;
+}
+
+.tree-row:hover { background: var(--surface-high); }
+.tree-row:selected { background: var(--primary); color: var(--text-bright); }
+
+.tree-twist {
+    width: 14px;
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+.tree-row:selected .tree-twist { color: var(--text-bright); }

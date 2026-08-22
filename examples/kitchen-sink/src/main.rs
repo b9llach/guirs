@@ -33,6 +33,7 @@ struct State {
     split_outer: Model<SplitState>,
     split_inner: Model<SplitState>,
     order: Model<Vec<String>>,
+    files: Model<TreeState>,
 }
 
 impl State {
@@ -56,6 +57,7 @@ impl State {
             last_command: Model::new(String::from("nothing yet")),
             split_outer: Model::new(SplitState::new(200.0).range(120.0, 420.0)),
             split_inner: Model::new(SplitState::new(150.0).range(60.0, 300.0)),
+            files: Model::new(TreeState::with_expanded(["crates", "crates/guirs-ui"])),
             order: Model::new(
                 ["Alpha", "Bravo", "Charlie", "Delta"]
                     .map(String::from)
@@ -328,6 +330,39 @@ fn components_section(state: &State) -> Div {
         })
 }
 
+/// A tree, the shape a file explorer is.
+///
+/// Only the open parts are built, which is what keeps a tree of any size
+/// affordable: a closed branch costs one row whatever is under it.
+fn file_tree(state: &State) -> Div {
+    let roots = [
+        node("crates", "crates").children([
+            node("crates/guirs-core", "guirs-core")
+                .children([node("crates/guirs-core/src", "src")]),
+            node("crates/guirs-ui", "guirs-ui").children([
+                node("crates/guirs-ui/tree.rs", "tree.rs"),
+                node("crates/guirs-ui/menu.rs", "menu.rs"),
+                node("crates/guirs-ui/split.rs", "split.rs"),
+            ]),
+        ]),
+        node("README.md", "README.md"),
+        node("Cargo.toml", "Cargo.toml"),
+    ];
+
+    let chosen = state.last_command.clone();
+
+    card()
+        .gap(12.0)
+        .child(text("Tree").class("section-title"))
+        .child(
+            text("Click a twist to open, a row to choose. Arrow keys walk it.")
+                .class("muted"),
+        )
+        .child(tree(&roots, state.files.clone(), move |key| {
+            chosen.set(format!("chose {key}"));
+        }))
+}
+
 /// A list whose rows can be picked up and dropped on each other.
 ///
 /// The canonical use for dragging inside a window, and the one every other
@@ -463,6 +498,8 @@ fn layout_section(state: &State) -> Div {
 
     page()
         .child(section("Layout", "Flexbox, the way a browser does it."))
+        .child(file_tree(state))
+        .child(reorderable(state))
         .child(
             card()
                 .gap(12.0)
@@ -471,7 +508,6 @@ fn layout_section(state: &State) -> Div {
                     text("Drag either divider. Nested, so the right hand side is itself split.")
                         .class("muted"),
                 )
-                .child(reorderable(state))
                 .child(
                     div().class("split-demo").child(split_x(
                         state.split_outer.clone(),

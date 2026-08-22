@@ -41,6 +41,8 @@ fn to_accesskit(role: AccessRole) -> Role {
         AccessRole::Image => Role::Image,
         AccessRole::Link => Role::Link,
         AccessRole::Splitter => Role::Splitter,
+        AccessRole::Tree => Role::Tree,
+        AccessRole::TreeItem => Role::TreeItem,
     }
 }
 

@@ -640,6 +640,33 @@ entry announces its own name and offers its shortcut as a shortcut rather than
 as part of the name, so a reader says "New" and offers Ctrl+N, rather than
 reading out "New Ctrl plus N" as though that were what it was called.
 
+## Trees
+
+```rust
+tree(&roots, state, |key| open_file(key))
+```
+
+A file explorer, an outline, a scene graph. What makes a tree different from a
+list is that what is on screen is not what is in the data: only the open parts
+are visible, and moving down one row can mean stepping into a branch or out of
+two.
+
+That flattening is the whole difficulty, so it is [`flatten`] on its own, a
+function of the nodes and what is open. It can be checked without drawing
+anything, and an application with a very large tree can call it and lay the
+rows out through a virtualized list rather than using `tree` directly.
+
+Nodes are identified by a key rather than by position, because open and
+selected have to survive the tree being rebuilt: a path does, an index does
+not.
+
+The arrow keys walk it the way a file explorer does. Right opens a closed
+branch **without** moving, and only steps into it once it is open, so holding
+it walks down a path rather than skipping past what was just revealed. Left
+closes an open branch, and on something already closed steps out to whatever
+contains it, which is the nearest row above that is one level shallower rather
+than simply the row above.
+
 ## Dragging inside the window
 
 A different thing from files arriving from the desktop: nothing leaves the

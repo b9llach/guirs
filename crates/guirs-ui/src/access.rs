@@ -49,6 +49,10 @@ pub enum AccessRole {
     Link,
     /// The draggable boundary between two panes.
     Splitter,
+    /// A tree of things that open and close.
+    Tree,
+    /// One thing in a tree.
+    TreeItem,
 }
 
 impl AccessRole {

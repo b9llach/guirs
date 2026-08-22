@@ -76,6 +76,7 @@ pub mod image;
 pub mod keymap;
 pub mod menu;
 pub mod split;
+pub mod tree;
 pub mod input;
 pub mod layout;
 pub mod model;
