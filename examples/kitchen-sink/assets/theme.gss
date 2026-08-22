@@ -577,3 +577,48 @@ textarea:focus { border-color: var(--primary); }
 }
 
 .tree-row:selected .tree-twist { color: var(--text-bright); }
+
+/* --------------------------------------------------------------------------
+   Table
+   -------------------------------------------------------------------------- */
+
+.table {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--surface);
+}
+
+.table-header {
+    background: var(--surface-high);
+    border-bottom: 1px solid var(--border);
+}
+
+.table-head {
+    padding: 8px 10px;
+    gap: 5px;
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 600;
+    border-right: 1px solid var(--border);
+}
+
+.table-head:hover { color: var(--text); }
+.table-sort { color: var(--primary); font-size: 10px; }
+
+.table-resize { background: transparent; }
+.table-resize:hover { background: var(--primary); }
+
+.table-row {
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    font-size: 13px;
+}
+
+.table-row:hover { background: var(--surface-high); }
+.table-row:selected { background: var(--primary); color: var(--text-bright); }
+
+.table-cell {
+    padding: 7px 10px;
+    border-right: 1px solid var(--border);
+}

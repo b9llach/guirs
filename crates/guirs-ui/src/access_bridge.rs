@@ -43,6 +43,10 @@ fn to_accesskit(role: AccessRole) -> Role {
         AccessRole::Splitter => Role::Splitter,
         AccessRole::Tree => Role::Tree,
         AccessRole::TreeItem => Role::TreeItem,
+        AccessRole::Table => Role::Table,
+        AccessRole::Row => Role::Row,
+        AccessRole::Cell => Role::Cell,
+        AccessRole::ColumnHeader => Role::ColumnHeader,
     }
 }
 

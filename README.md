@@ -667,6 +667,32 @@ closes an open branch, and on something already closed steps out to whatever
 contains it, which is the nearest row above that is one level shallower rather
 than simply the row above.
 
+## Tables
+
+```rust
+table(&columns, rows.len(), state, |row, col| {
+    div().child(text(cell_text(row, col.key())))
+})
+```
+
+The table does not hold the data and does not sort it. It reports which column
+somebody asked to sort by and in which direction, and the application sorts its
+own rows. Anything else means copying the data in, or teaching the table how to
+compare values it has never seen. Cells are asked for one at a time and can
+hold anything, so a cell is a widget rather than a string.
+
+Clicking a heading sorts ascending, then descending, then not at all. The third
+press is the one that matters: without it there is no way back to whatever
+order the data was in to begin with.
+
+Dragging a heading's trailing edge resizes the column, and a column cannot be
+dragged shut, because the handle that would widen it again goes with it.
+
+One thing worth knowing if you build something similar: stopping a press from
+propagating does **not** stop the click that follows it. The heading has to
+recognise a press on its own trailing edge as a resize, or every column dragged
+wider is also sorted.
+
 ## Dragging inside the window
 
 A different thing from files arriving from the desktop: nothing leaves the

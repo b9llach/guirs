@@ -118,6 +118,7 @@ pub use guirs_ui::menu::{
 pub use guirs_ui::split::{split, split_x, split_y, SplitState};
 pub use guirs_ui::drag::{DragState, Dragged};
 pub use guirs_ui::tree::{flatten, node, tree, TreeNode, TreeRow, TreeState};
+pub use guirs_ui::table::{table, table_column, Column, SortOrder, TableState};
 
 pub use guirs_ui::impl_into_element;
 
@@ -131,7 +132,7 @@ pub mod prelude {
         scroll_view_xy,
         select, separator, slider, spacer, stack, tab_bar, text, text_area, text_button,
         context_menu, img, menu_bar, menu_item, menu_separator, node, split_x, split_y,
-        submenu, text_input, tree,
+        submenu, table, table_column, text_input, tree,
         title_bar, toggle, when, window_controls, window_frame,
     };
     pub use crate::{
@@ -142,7 +143,8 @@ pub mod prelude {
         Length, LineHeight, Model, Modifiers, MouseButton, MouseEvent, Overflow, Paint, Point, Px,
         ResizeEdge, Rgba, RichText, ScrollEvent, SharedString, Size, SpanStyle, StateFlags, Style,
         Styled, Stylesheet, Text, TextAlign, TextInputState, TextSpan, Transform2D, Transition,
-        Dragged, Keymap, MenuItem, MenuState, ObjectFit, SplitState, TreeNode, TreeState, TransitionTarget, WhiteSpace, Window,
+        Column, Dragged, Keymap, MenuItem, MenuState, ObjectFit, SortOrder, SplitState,
+        TableState, TreeNode, TreeState, TransitionTarget, WhiteSpace, Window,
         WindowAction, WindowOptions,
     };
     pub use crate::{

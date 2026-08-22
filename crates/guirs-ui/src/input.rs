@@ -1444,6 +1444,89 @@ mod tests {
 
     // -- commands and key contexts ----------------------------------------
 
+    #[test]
+    fn a_tables_resize_handle_is_where_it_can_be_grabbed() {
+        // The handle is placed against the heading's trailing edge. If the
+        // absolute placement produces nothing, the press lands on the heading
+        // instead and resizing a column silently sorts it.
+        use crate::table::{table, table_column, TableState, EDGE_HIT};
+
+        let state = Model::new(TableState::default());
+        let columns = [table_column("name", "Name").width(200.0)];
+
+        let mut harness = Harness::new();
+        harness.frame(
+            div()
+                .size_full()
+                .child(table(&columns, 1, state, |_, _| {
+                    div().child(text("cell"))
+                }))
+                .into_any(),
+        );
+
+        // The heading is the widest thing at the top; the handle is the thin
+        // one at its right edge.
+        let handles: Vec<&HitRegion> = harness
+            .cx
+            .hits
+            .iter()
+            .filter(|region| {
+                region.bounds.size.width.0 > 0.0
+                    && region.bounds.size.width.0 <= EDGE_HIT + 0.5
+                    && region.bounds.size.height.0 > 4.0
+            })
+            .collect();
+
+        assert!(
+            !handles.is_empty(),
+            "no grab handle was laid out at all; widths seen: {:?}",
+            harness
+                .cx
+                .hits
+                .iter()
+                .map(|r| (r.bounds.size.width.0, r.bounds.size.height.0))
+                .collect::<Vec<_>>()
+        );
+        let handle = handles[0];
+        assert!(
+            (handle.bounds.origin.x.0 + handle.bounds.size.width.0 - 200.0).abs() < 1.0,
+            "the handle is not on the column's trailing edge: {:?}",
+            handle.bounds
+        );
+    }
+
+    #[test]
+    fn dragging_a_column_edge_does_not_also_sort_it() {
+        // Stopping the press from propagating does not stop the click that
+        // follows, so a heading has to recognise the gesture itself.
+        use crate::table::{table, table_column, TableState};
+
+        let state = Model::new(TableState::default());
+        let columns = [table_column("name", "Name").width(200.0)];
+
+        let mut harness = Harness::new();
+        harness.frame(
+            div()
+                .size_full()
+                .child(table(&columns, 1, state.clone(), |_, _| {
+                    div().child(text("cell"))
+                }))
+                .into_any(),
+        );
+
+        // On the trailing edge: a resize.
+        harness.click(198.0, 10.0);
+        assert_eq!(
+            state.read().sort(),
+            None,
+            "dragging the edge sorted the column"
+        );
+
+        // Well inside it: a sort.
+        harness.click(80.0, 10.0);
+        assert!(state.read().sort().is_some(), "the heading stopped sorting");
+    }
+
     // -- dragging inside the window ---------------------------------------
 
     /// A source on the left and a target on the right, reporting what landed.

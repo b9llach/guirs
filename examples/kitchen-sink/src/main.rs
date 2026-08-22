@@ -34,6 +34,7 @@ struct State {
     split_inner: Model<SplitState>,
     order: Model<Vec<String>>,
     files: Model<TreeState>,
+    grid: Model<TableState>,
 }
 
 impl State {
@@ -58,6 +59,7 @@ impl State {
             split_outer: Model::new(SplitState::new(200.0).range(120.0, 420.0)),
             split_inner: Model::new(SplitState::new(150.0).range(60.0, 300.0)),
             files: Model::new(TreeState::with_expanded(["crates", "crates/guirs-ui"])),
+            grid: Model::new(TableState::default()),
             order: Model::new(
                 ["Alpha", "Bravo", "Charlie", "Delta"]
                     .map(String::from)
@@ -407,6 +409,70 @@ fn reorderable(state: &State) -> Div {
         .child(list)
 }
 
+/// A table whose headers sort and whose edges drag.
+///
+/// The table reports what was asked for; the sorting happens here, on the
+/// application's own data, which is the only place that knows how to compare
+/// a size or a name.
+fn data_table(state: &State) -> Div {
+    const FILES: [(&str, u32, &str); 6] = [
+        ("renderer.rs", 48_120, "Rust"),
+        ("theme.gss", 9_804, "Stylesheet"),
+        ("main.rs", 31_402, "Rust"),
+        ("README.md", 52_990, "Markdown"),
+        ("shape.rs", 22_781, "Rust"),
+        ("icon.rs", 7_336, "Rust"),
+    ];
+
+    let columns = [
+        table_column("name", "Name").width(200.0),
+        table_column("size", "Size").width(110.0),
+        table_column("kind", "Kind").width(140.0),
+    ];
+
+    // Sorted here rather than by the table, because only this knows that a
+    // size is a number and a name is not.
+    let mut rows: Vec<usize> = (0..FILES.len()).collect();
+    if let Some((key, order)) = state.grid.read().sort() {
+        rows.sort_by(|a, b| {
+            let ordering = match key.as_ref() {
+                "size" => FILES[*a].1.cmp(&FILES[*b].1),
+                "kind" => FILES[*a].2.cmp(FILES[*b].2),
+                _ => FILES[*a].0.cmp(FILES[*b].0),
+            };
+            match order {
+                SortOrder::Ascending => ordering,
+                SortOrder::Descending => ordering.reverse(),
+            }
+        });
+    }
+
+    let order = rows.clone();
+    card()
+        .gap(12.0)
+        .child(text("Table").class("section-title"))
+        .child(
+            text("Click a heading to sort, again to reverse, again to stop. Drag a heading's right edge to resize.")
+                .class("muted"),
+        )
+        .child(table(
+            &columns,
+            FILES.len(),
+            state.grid.clone(),
+            move |row, col| {
+                let file = FILES[order[row]];
+                div().child(
+                    text(match col.key().as_ref() {
+                        "size" => format!("{} B", file.1),
+                        "kind" => file.2.to_string(),
+                        _ => file.0.to_string(),
+                    })
+                    .whitespace_nowrap(),
+                )
+            },
+        ))
+}
+
 fn typography_section() -> Div {
     let sizes: [(&str, f32, FontWeight); 5] = [
         ("Display", 30.0, FontWeight::SEMIBOLD),
@@ -499,6 +565,7 @@ fn layout_section(state: &State) -> Div {
     page()
         .child(section("Layout", "Flexbox, the way a browser does it."))
         .child(file_tree(state))
+        .child(data_table(state))
         .child(reorderable(state))
         .child(
             card()

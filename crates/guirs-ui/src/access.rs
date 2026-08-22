@@ -53,6 +53,14 @@ pub enum AccessRole {
     Tree,
     /// One thing in a tree.
     TreeItem,
+    /// Rows and columns of data.
+    Table,
+    /// One row of a table.
+    Row,
+    /// One cell of a table.
+    Cell,
+    /// The heading at the top of a column.
+    ColumnHeader,
 }
 
 impl AccessRole {
