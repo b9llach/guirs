@@ -1,0 +1,6 @@
+# Normalise to LF in the repository. The build runs on three platforms and a
+# file that arrives with the wrong endings fails a diff rather than a compile,
+# which is a confusing way to find out.
+* text=auto eol=lf
+*.png binary
+*.ico binary
