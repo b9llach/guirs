@@ -30,9 +30,6 @@ pub struct Window {
     start: Instant,
 
     background: Rgba,
-    /// Which keys ask for which commands. Empty by default, in which case no
-    /// key press is ever intercepted.
-    keymap: crate::keymap::Keymap,
     /// Whatever part of a sequence has been typed but not yet resolved.
     keys: crate::keymap::KeymapState,
     needs_redraw: bool,
@@ -48,7 +45,6 @@ impl Window {
             renderer,
             root,
             input: InputRouter::new(),
-            keymap: crate::keymap::Keymap::new(),
             keys: crate::keymap::KeymapState::default(),
             start: Instant::now(),
             needs_redraw: true,
@@ -224,7 +220,7 @@ impl Window {
     /// Feed one input event through the tree.
     /// Install the keymap this window resolves presses against.
     pub fn set_keymap(&mut self, keymap: crate::keymap::Keymap) {
-        self.keymap = keymap;
+        self.cx.keymap = keymap;
         self.keys.clear();
     }
 
@@ -254,6 +250,11 @@ impl Window {
         if outcome.quit {
             self.should_close = true;
         }
+        // Anything a handler asked for while it was running, now that the
+        // handler table is no longer borrowed.
+        let queued = self.cx.drain_commands();
+        self.needs_redraw |= queued.redraw || queued.handled;
+        self.should_close |= queued.quit;
     }
 
     /// Give the keymap first refusal on a press.
@@ -265,9 +266,13 @@ impl Window {
     fn handle_binding(&mut self, key: &crate::event::KeyEvent) -> bool {
         use crate::keymap::Match;
 
+        // Both live on the context, so they are taken out for the duration of
+        // the call and put straight back.
+        let keymap = std::mem::take(&mut self.cx.keymap);
         let contexts = std::mem::take(&mut self.cx.focused_contexts);
-        let outcome = self.keys.press(&self.keymap, &contexts, key);
+        let outcome = self.keys.press(&keymap, &contexts, key);
         self.cx.focused_contexts = contexts;
+        self.cx.keymap = keymap;
 
         match outcome {
             Match::None => false,
@@ -427,6 +432,12 @@ impl Window {
                 handler(&event, &mut context);
                 self.needs_redraw = true;
                 self.should_close |= quit;
+                // A handler may have asked for a command, which is what every
+                // menu item does. Without this a reader could open a menu and
+                // choose from it and nothing would happen.
+                let queued = self.cx.drain_commands();
+                self.needs_redraw |= queued.redraw || queued.handled;
+                self.should_close |= queued.quit;
                 true
             }
             _ => false,

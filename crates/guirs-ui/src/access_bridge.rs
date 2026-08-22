@@ -93,6 +93,9 @@ pub fn build(
             out.set_min_numeric_value(min);
             out.set_max_numeric_value(max);
         }
+        if let Some(shortcut) = &node.shortcut {
+            out.set_keyboard_shortcut(shortcut.to_string());
+        }
         if node.disabled {
             out.set_disabled();
         }

@@ -1401,6 +1401,109 @@ mod tests {
     }
 
     #[test]
+    fn a_command_asked_for_from_inside_a_handler_is_sent_afterwards() {
+        // What a menu item does: it is chosen during a click, and the command
+        // cannot be sent from there because the handler table is borrowed.
+        let ran = Model::new(String::new());
+        let answered = ran.clone();
+
+        let mut harness = Harness::new();
+        harness.frame(
+            div()
+                .size_full()
+                .on_command("file:save", move |_| answered.set("saved".into()))
+                .child(
+                    div()
+                        .size(px_(20.0))
+                        .focusable()
+                        .autofocus()
+                        .on_click(|_, cx| cx.dispatch_command("file:save")),
+                )
+                .into_any(),
+        );
+
+        harness.click(10.0, 10.0);
+        assert_eq!(ran.get(), "", "it went out during the click");
+        let outcome = harness.cx.drain_commands();
+        assert!(outcome.handled);
+        assert_eq!(ran.get(), "saved");
+    }
+
+    #[test]
+    fn a_command_that_asks_for_itself_does_not_spin_forever() {
+        // A window that stops responding is a worse failure than one that
+        // drops the tail of an unreasonable chain.
+        let count = Model::new(0u32);
+        let seen = count.clone();
+
+        let mut harness = Harness::new();
+        harness.frame(
+            div()
+                .size_full()
+                .focusable()
+                .autofocus()
+                .on_command("loop:forever", move |cx| {
+                    seen.update(|n| *n += 1);
+                    cx.dispatch_command("loop:forever");
+                })
+                .into_any(),
+        );
+
+        harness.cx.input.pending_commands.push("loop:forever".into());
+        harness.cx.drain_commands();
+        let runs = count.get();
+        assert!(runs > 0, "it never ran at all");
+        assert!(runs <= 16, "it ran {runs} times and did not stop");
+    }
+
+    #[test]
+    fn a_command_reaches_a_handler_with_nothing_focused() {
+        // What a menu does. Nothing is focused while a menu is open, and a
+        // command that only travelled the focus chain would go nowhere.
+        let ran = Model::new(String::new());
+        let answered = ran.clone();
+
+        let mut harness = Harness::new();
+        harness.frame(
+            div()
+                .size_full()
+                .on_command("file:save", move |_| answered.set("saved".into()))
+                .into_any(),
+        );
+
+        assert_eq!(harness.cx.input.focused, None, "the test assumed no focus");
+        assert!(harness.cx.dispatch_command("file:save").handled);
+        assert_eq!(ran.get(), "saved");
+    }
+
+    #[test]
+    fn focus_still_wins_over_the_fallback() {
+        // The fallback must not overtake the chain: the nearest handler to
+        // focus is still the one that should answer.
+        let ran = Model::new(String::new());
+        let outer = ran.clone();
+        let inner = ran.clone();
+
+        let mut harness = Harness::new();
+        harness.frame(
+            div()
+                .size_full()
+                .on_command("edit:copy", move |_| outer.set("outer".into()))
+                .child(
+                    div()
+                        .size(px_(10.0))
+                        .focusable()
+                        .autofocus()
+                        .on_command("edit:copy", move |_| inner.set("inner".into())),
+                )
+                .into_any(),
+        );
+
+        harness.cx.dispatch_command("edit:copy");
+        assert_eq!(ran.get(), "inner");
+    }
+
+    #[test]
     fn a_command_nothing_answers_is_not_an_error() {
         let mut harness = Harness::new();
         harness.frame(div().size_full().into_any());
@@ -2080,6 +2183,57 @@ mod tests {
         // The name stays put while the value changes. A name that moved with
         // every keystroke would announce a different control each time.
         assert_eq!(field.value.as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn a_control_is_not_named_after_the_popup_inside_it() {
+        // A menu title paints the menu it opened as a child of itself. Named
+        // from its contents, it comes out called after every entry on the
+        // menu, which is what a reader would then announce.
+        let tree = described(
+            div()
+                .size_full()
+                .child(
+                    crate::div::Div::new("button")
+                        .label("File")
+                        .child(text("File"))
+                        .child(
+                            div()
+                                .overlay()
+                                .child(text("Open Recent"))
+                                .child(text("Save")),
+                        ),
+                )
+                .into_any(),
+        );
+        assert!(
+            named(&tree, "File").is_some(),
+            "the control is not called what it says it is called: {:?}",
+            tree.nodes
+                .iter()
+                .filter_map(|n| n.label.clone())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn a_shortcut_is_offered_apart_from_the_name() {
+        // "New Ctrl+N" read as a name is wrong twice over: it is not what the
+        // entry is called, and the key is not announced as a key.
+        let tree = described(
+            div()
+                .size_full()
+                .child(
+                    crate::div::Div::new("button")
+                        .label("New")
+                        .access_shortcut("Ctrl+N")
+                        .child(text("New"))
+                        .child(text("Ctrl+N").decorative()),
+                )
+                .into_any(),
+        );
+        let node = named(&tree, "New").expect("the entry lost its name");
+        assert_eq!(node.shortcut.as_deref(), Some("Ctrl+N"));
     }
 
     #[test]

@@ -440,3 +440,65 @@ textarea:focus { border-color: var(--primary); }
 
 .stat-value { font-size: 22px; font-weight: 600; color: var(--text-bright); }
 .stat-label { font-size: 11px; color: var(--text-muted); }
+
+/* --------------------------------------------------------------------------
+   Menus
+   -------------------------------------------------------------------------- */
+
+.menu-bar {
+    gap: 2px;
+}
+
+.menu-title {
+    padding: 5px 10px;
+    border-radius: 5px;
+    color: var(--text);
+    font-size: 13px;
+}
+
+.menu-title:hover { background: var(--surface-high); }
+.menu-title:open { background: var(--primary); color: var(--text-bright); }
+
+.menu {
+    background: var(--overlay);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 5px;
+    min-width: 190px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.menu-item {
+    padding: 6px 9px;
+    border-radius: 5px;
+    gap: 8px;
+    color: var(--text);
+    font-size: 13px;
+}
+
+.menu-item:hover { background: var(--surface-high); }
+.menu-item:open { background: var(--surface-high); }
+.menu-item:disabled { color: var(--text-muted); }
+
+.menu-check {
+    width: 12px;
+    color: var(--primary);
+    font-size: 12px;
+}
+
+.menu-arrow {
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+.menu-shortcut {
+    color: var(--text-muted);
+    font-size: 12px;
+    padding-left: 20px;
+}
+
+.menu-separator {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 6px 4px 6px;
+}

@@ -118,6 +118,8 @@ pub struct AccessNode {
     pub value: Option<SharedString>,
     /// The text of a label, which is also where a container gets its name.
     pub text: Option<SharedString>,
+    /// The key that runs this, for a reader to offer alongside the name.
+    pub shortcut: Option<SharedString>,
     pub focusable: bool,
     /// Whether pressing this does something. Taken from whether the element
     /// has a click handler rather than from its role, because a navigation
@@ -143,6 +145,7 @@ impl AccessNode {
             label: None,
             value: None,
             text: None,
+            shortcut: None,
             focusable: false,
             clickable: false,
             disabled: false,

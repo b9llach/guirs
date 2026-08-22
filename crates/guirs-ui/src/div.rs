@@ -65,6 +65,7 @@ pub struct Div {
     access_role: Option<crate::access::AccessRole>,
     access_checked: Option<bool>,
     access_value: Option<SharedString>,
+    access_shortcut: Option<SharedString>,
     access_numeric: Option<[f64; 3]>,
     access_decorative: bool,
 
@@ -103,6 +104,7 @@ impl Div {
             access_role: None,
             access_checked: None,
             access_value: None,
+            access_shortcut: None,
             access_numeric: None,
             access_decorative: false,
             global_id: GlobalElementId::ROOT,
@@ -340,6 +342,15 @@ impl Div {
     }
 
     /// What this control currently holds, where that is not its text.
+    /// The key that runs this, for a reader to offer alongside the name.
+    ///
+    /// Kept apart from the name on purpose: a control called "New Ctrl+N" is
+    /// read as though that were its name, rather than as a name and a key.
+    pub fn access_shortcut(mut self, shortcut: impl Into<SharedString>) -> Self {
+        self.access_shortcut = Some(shortcut.into());
+        self
+    }
+
     pub fn access_value(mut self, value: impl Into<SharedString>) -> Self {
         self.access_value = Some(value.into());
         self
@@ -606,6 +617,7 @@ impl Element for Div {
             if let Some(node) = cx.access.current_mut() {
                 node.label = self.access_label.clone();
                 node.value = self.access_value.clone();
+                node.shortcut = self.access_shortcut.clone();
                 node.checked = self.access_checked;
                 node.numeric = self.access_numeric;
                 node.focusable = self.focusable;

@@ -111,6 +111,10 @@ pub use guirs_ui::{
     MessageLevel, NewWindow, Preedit, Task,
 };
 pub use guirs_ui::image::{img, Img, ImageError, ImageSource, ImageStatus, ImageStore, ObjectFit};
+pub use guirs_ui::keymap::{keystroke, Binding, Keymap, KeymapState, Keystroke, Match};
+pub use guirs_ui::menu::{
+    context_menu, menu_bar, menu_item, menu_separator, submenu, MenuItem, MenuState,
+};
 
 pub use guirs_ui::impl_into_element;
 
@@ -123,7 +127,8 @@ pub mod prelude {
         scroll_view_x,
         scroll_view_xy,
         select, separator, slider, spacer, stack, tab_bar, text, text_area, text_button,
-        img, text_input, title_bar, toggle, when, window_controls, window_frame,
+        context_menu, img, menu_bar, menu_item, menu_separator, submenu, text_input,
+        title_bar, toggle, when, window_controls, window_frame,
     };
     pub use crate::{
         AlignItems, AnimatableProperty, AnyElement, App, AppError, Bounds, BoxShadow, Corners,
@@ -133,7 +138,8 @@ pub mod prelude {
         Length, LineHeight, Model, Modifiers, MouseButton, MouseEvent, Overflow, Paint, Point, Px,
         ResizeEdge, Rgba, RichText, ScrollEvent, SharedString, Size, SpanStyle, StateFlags, Style,
         Styled, Stylesheet, Text, TextAlign, TextInputState, TextSpan, Transform2D, Transition,
-        ObjectFit, TransitionTarget, WhiteSpace, Window, WindowAction, WindowOptions,
+        Keymap, MenuItem, MenuState, ObjectFit, TransitionTarget, WhiteSpace, Window,
+        WindowAction, WindowOptions,
     };
     pub use crate::{
         confirm, message, spawn, FileDialog, FileDropEvent, MessageDialog, MessageLevel, Task,

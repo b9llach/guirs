@@ -26,6 +26,10 @@ struct State {
     search: Model<TextInputState>,
     notes: Model<TextInputState>,
     clicks: Model<u32>,
+    menus: Model<MenuState>,
+    /// What the last command asked for, so choosing one visibly does
+    /// something rather than being taken on faith.
+    last_command: Model<String>,
 }
 
 impl State {
@@ -45,6 +49,8 @@ impl State {
                 "An area wraps at its own width and grows as lines are added.\n\nEnter starts a new one. Up and down move between them, and keep the column they set out from.",
             )),
             clicks: Model::new(0),
+            menus: Model::new(MenuState::default()),
+            last_command: Model::new(String::from("nothing yet")),
         }
     }
 }
@@ -69,6 +75,19 @@ fn main() -> Result<(), AppError> {
         .size(1180.0, 780.0)
         .min_size(720.0, 520.0)
         .stylesheet_file(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/theme.gss"))
+        // One keymap for the whole application. The menu reads it to show
+        // each entry's shortcut, so neither has to repeat the other.
+        .keymap(
+            Keymap::new()
+                .bind("cmd-n", "file:new")
+                .bind("cmd-o", "file:open")
+                .bind("cmd-s", "file:save")
+                .bind("cmd-shift-s", "file:save-as")
+                .bind("cmd-z", "edit:undo")
+                .bind("cmd-shift-z", "edit:redo")
+                .bind("cmd-k cmd-d", "edit:duplicate")
+                .bind("f11", "view:full-screen"),
+        )
         // Run `GUIRS_NO_VSYNC=1 kitchen-sink` to see the uncapped frame cost.
         .when(std::env::var_os("GUIRS_NO_VSYNC").is_some(), App::without_vsync)
         .run(move |cx| {
@@ -88,7 +107,7 @@ fn main() -> Result<(), AppError> {
                 .class("root")
                 .size_full()
                 .col()
-                .child(titlebar(&state, fps, frame_ms, &phases))
+                .child(titlebar(&state, fps, frame_ms, &phases, &cx.keymap))
                 .child(
                     div()
                         .row()
@@ -101,7 +120,7 @@ fn main() -> Result<(), AppError> {
         })
 }
 
-fn titlebar(state: &State, fps: f32, frame_ms: f32, phases: &str) -> Div {
+fn titlebar(state: &State, fps: f32, frame_ms: f32, phases: &str, keymap: &Keymap) -> Div {
     let clicks = state.clicks.clone();
 
     div()
@@ -111,8 +130,14 @@ fn titlebar(state: &State, fps: f32, frame_ms: f32, phases: &str) -> Div {
         .gap(10.0)
         .child(text("guirs").class("title").whitespace_nowrap())
         .child(text("kitchen sink").class("muted small").whitespace_nowrap())
-        .child(text(format!("v{}", guirs::VERSION)).class("badge"))
+        .child(text(format!("v{}", guirs::VERSION)).class("badge").whitespace_nowrap())
+        .child(menus(state, keymap))
         .child(flex_spacer())
+        .child(
+            text(format!("last command: {}", state.last_command.read()))
+                .class("mono small muted")
+                .whitespace_nowrap(),
+        )
         .child(text(phases).class("mono small muted").whitespace_nowrap())
         .child(
             text(format!("{fps:.0} fps  {frame_ms:.1} ms"))
@@ -120,6 +145,73 @@ fn titlebar(state: &State, fps: f32, frame_ms: f32, phases: &str) -> Div {
                 .whitespace_nowrap(),
         )
         .child(text(format!("{} clicks", clicks.get())).class("muted small").whitespace_nowrap())
+}
+
+/// The menu bar, and the handlers for everything it can ask for.
+///
+/// Each entry names a command and nothing else. The shortcuts beside them are
+/// read from the keymap, so rebinding a key changes the menu with it.
+fn menus(state: &State, keymap: &Keymap) -> Div {
+    let items = [
+        submenu(
+            "File",
+            [
+                menu_item("New").command("file:new"),
+                menu_item("Open").command("file:open"),
+                submenu(
+                    "Open Recent",
+                    [
+                        menu_item("kitchen-sink.rs").command("file:open-recent"),
+                        menu_item("theme.gss").command("file:open-recent"),
+                    ],
+                ),
+                menu_separator(),
+                menu_item("Save").command("file:save"),
+                menu_item("Save As").command("file:save-as"),
+                menu_separator(),
+                menu_item("Quit").command("app:quit"),
+            ],
+        ),
+        submenu(
+            "Edit",
+            [
+                menu_item("Undo").command("edit:undo"),
+                menu_item("Redo").command("edit:redo").enabled(false),
+                menu_separator(),
+                menu_item("Duplicate Line").command("edit:duplicate"),
+            ],
+        ),
+        submenu(
+            "View",
+            [
+                menu_item("Dark Mode").command("view:dark").checked(state.dark_mode.get()),
+                menu_item("Full Screen").command("view:full-screen"),
+            ],
+        ),
+    ];
+
+    let heard = state.last_command.clone();
+    let dark = state.dark_mode.clone();
+
+    menu_bar(&items, state.menus.clone(), keymap)
+        // Every command lands here. An application would answer each one
+        // somewhere meaningful; this shows what arrived, which is the part
+        // worth seeing.
+        .on_command("file:new", command_echo(&heard, "file:new"))
+        .on_command("file:open", command_echo(&heard, "file:open"))
+        .on_command("file:open-recent", command_echo(&heard, "file:open-recent"))
+        .on_command("file:save", command_echo(&heard, "file:save"))
+        .on_command("file:save-as", command_echo(&heard, "file:save-as"))
+        .on_command("edit:undo", command_echo(&heard, "edit:undo"))
+        .on_command("edit:duplicate", command_echo(&heard, "edit:duplicate"))
+        .on_command("view:full-screen", command_echo(&heard, "view:full-screen"))
+        .on_command("app:quit", |cx| cx.quit())
+        .on_command("view:dark", move |_| dark.update(|on| *on = !*on))
+}
+
+fn command_echo(heard: &Model<String>, name: &'static str) -> impl Fn(&mut EventContext) {
+    let heard = heard.clone();
+    move |_| heard.set(name.to_string())
 }
 
 fn sidebar(state: &State, fps: f32) -> Div {
@@ -969,7 +1061,7 @@ mod tests {
                 .class("root")
                 .size_full()
                 .col()
-                .child(titlebar(&state, 60.0, 1.0, "build 0.4  layout 0.3"))
+                .child(titlebar(&state, 60.0, 1.0, "build 0.4  layout 0.3", &Keymap::new()))
                 .child(row().flex_1().child(sidebar(&state, 60.0)).child(content(&state)))
                 .into_any(),
         );

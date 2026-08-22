@@ -362,6 +362,13 @@ impl StateStore {
 /// Pointer and keyboard state carried between frames.
 #[derive(Debug, Default)]
 pub struct InputState {
+    /// Commands asked for from inside a handler, waiting to be sent.
+    ///
+    /// Queued rather than sent straight away because a handler is running
+    /// while the handler table is borrowed, and a menu item's whole job is to
+    /// ask for a command from inside one. The window drains this once the
+    /// event it came from is finished.
+    pub pending_commands: Vec<SharedString>,
     pub mouse_position: Point<Px>,
     pub mouse_inside: bool,
     pub buttons: SmallVec<[MouseButton; 3]>,
@@ -416,6 +423,17 @@ pub struct EventContext<'a> {
     quit: &'a mut bool,
     propagate: bool,
     target: GlobalElementId,
+}
+
+impl EventContext<'_> {
+    /// Ask for a command, as a menu item does when it is chosen.
+    ///
+    /// Sent once the current event is finished rather than immediately, so it
+    /// reaches whatever has focus by then and not whatever is half way through
+    /// handling a click.
+    pub fn dispatch_command(&mut self, command: impl Into<SharedString>) {
+        self.input.pending_commands.push(command.into());
+    }
 }
 
 impl<'a> EventContext<'a> {
@@ -588,6 +606,12 @@ pub struct Cx {
     /// two places is read once and held once.
     pub images: crate::image::ImageStore,
 
+    /// Which keys ask for which commands.
+    ///
+    /// Readable while building, so a menu can show the shortcut for a command
+    /// without being told it twice and without the two drifting apart.
+    pub keymap: crate::keymap::Keymap,
+
     /// Key contexts enclosing whatever is being painted, outermost first.
     key_contexts: Vec<SharedString>,
     /// The same stack, captured at the moment the focused element painted.
@@ -599,6 +623,8 @@ pub struct Cx {
     /// Everything enclosing the focused element, outermost first, ending with
     /// the element itself. The path a command travels back along.
     pub focused_chain: Vec<GlobalElementId>,
+    /// Everything that answers any command, in paint order.
+    command_targets: Vec<GlobalElementId>,
 
     /// Where the focused field's caret is, for an input method's candidate
     /// window. `None` when nothing that accepts composition has focus, which
@@ -694,9 +720,11 @@ impl Cx {
             editors: HashMap::new(),
             access: crate::access::AccessTree::default(),
             images: crate::image::ImageStore::default(),
+            keymap: crate::keymap::Keymap::new(),
             key_contexts: Vec::new(),
             focused_contexts: Vec::new(),
             focused_chain: Vec::new(),
+            command_targets: Vec::new(),
             ime_area: None,
             snap_target: None,
             redraw_at: None,
@@ -766,6 +794,7 @@ impl Cx {
         // used to be.
         self.focused_contexts.clear();
         self.focused_chain.clear();
+        self.command_targets.clear();
     }
 
     /// Send a command to whatever answers it, starting from the keyboard.
@@ -774,7 +803,18 @@ impl Cx {
     /// way a click travels outwards from whatever was under the pointer.
     /// Returns whether anything did.
     pub fn dispatch_command(&mut self, command: &str) -> CommandOutcome {
-        let chain: Vec<GlobalElementId> = self.focused_chain.iter().rev().copied().collect();
+        // Along the focus chain first, innermost outwards, so the nearest
+        // thing that cares wins. Then anything else that answers commands,
+        // most recently painted first. Without the second pass a command from
+        // a menu would go nowhere whenever focus happened to be elsewhere, or
+        // nowhere at all, which is most of the time a menu is open.
+        let mut chain: Vec<GlobalElementId> = self.focused_chain.iter().rev().copied().collect();
+        chain.extend(
+            self.command_targets
+                .iter()
+                .rev()
+                .filter(|id| !self.focused_chain.contains(id)),
+        );
         for id in chain {
             let Some(handlers) = self.handlers.get(&id) else {
                 continue;
@@ -796,6 +836,29 @@ impl Cx {
             return CommandOutcome { handled: true, redraw, quit };
         }
         CommandOutcome::default()
+    }
+
+    /// Send everything handlers asked for while they were running.
+    ///
+    /// Returns the combined outcome. Bounded rather than looped to exhaustion:
+    /// a command that asks for itself would otherwise spin forever, and a
+    /// window that stops responding is a worse failure than one that drops the
+    /// last of a very long chain.
+    pub fn drain_commands(&mut self) -> CommandOutcome {
+        let mut combined = CommandOutcome::default();
+        for _ in 0..16 {
+            let queued = std::mem::take(&mut self.input.pending_commands);
+            if queued.is_empty() {
+                break;
+            }
+            for command in queued {
+                let outcome = self.dispatch_command(&command);
+                combined.handled |= outcome.handled;
+                combined.redraw |= outcome.redraw;
+                combined.quit |= outcome.quit;
+            }
+        }
+        combined
     }
 
     /// Finish a frame, evicting state nobody used.
@@ -1053,6 +1116,11 @@ impl Cx {
     pub fn register_handlers(&mut self, id: GlobalElementId, handlers: &Handlers) {
         if handlers.is_empty() {
             return;
+        }
+        // Kept in paint order so a command that nothing along the focus chain
+        // answers can still be offered to the rest of the window.
+        if !handlers.on_command.is_empty() {
+            self.command_targets.push(id);
         }
         self.handlers.insert(id, handlers.clone());
     }

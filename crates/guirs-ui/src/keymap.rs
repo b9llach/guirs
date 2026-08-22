@@ -75,12 +75,10 @@ impl Keystroke {
         if self.alt != modifiers.alt {
             return false;
         }
-        // Shift is part of a keystroke for a named key, but for a character
-        // the platform has already folded it into which character arrived, so
-        // asking again would reject every capital letter.
-        if matches!(self.key, Key::Character(_)) {
-            return true;
-        }
+        // Checked for every key, characters included. A character arrives
+        // already lowercased, so shift is the only thing separating `cmd-s`
+        // from `cmd-shift-s`, and ignoring it makes both bindings match the
+        // same press.
         self.shift == modifiers.shift
     }
 
@@ -339,6 +337,26 @@ impl Keymap {
         &self.bindings
     }
 
+    /// How a command's shortcut reads, for showing beside it in a menu.
+    ///
+    /// The last binding wins, matching how a press resolves, so a menu shows
+    /// the key that will actually run the command rather than one that has
+    /// been overridden. A sequence is joined with spaces, the way it is typed.
+    pub fn shortcut_for(&self, command: &str) -> Option<String> {
+        self.bindings
+            .iter()
+            .rev()
+            .find(|binding| binding.command.as_ref() == command)
+            .map(|binding| {
+                binding
+                    .strokes
+                    .iter()
+                    .map(|stroke| stroke.display())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+    }
+
     /// What a press means, given where focus is and what came before it.
     ///
     /// `contexts` runs outermost first, the way the tree does, so the last
@@ -414,7 +432,7 @@ impl Keymap {
 pub fn strokes_of(event: &KeyEvent) -> Keystroke {
     Keystroke {
         key: event.key,
-        shift: event.modifiers.shift && !matches!(event.key, Key::Character(_)),
+        shift: event.modifiers.shift,
         alt: event.modifiers.alt,
         accelerator: event.modifiers.accelerator(),
         control: if Modifiers::accelerator_is_control() {
@@ -651,15 +669,27 @@ mod tests {
     }
 
     #[test]
-    fn shift_is_not_asked_for_twice_on_a_letter() {
-        // The platform reports a capital as a different character, so a
-        // binding that also demanded shift would never match one.
-        let keymap = Keymap::new().bind("cmd-shift-p", "command:palette");
-        let mut modifiers = accel();
-        modifiers.shift = true;
+    fn shift_separates_two_bindings_on_the_same_letter() {
+        // A character arrives lowercased whether or not shift was held, so
+        // shift is the only thing telling these apart. Ignoring it makes both
+        // match the same press and the later one silently wins.
+        let keymap = Keymap::new()
+            .bind("cmd-s", "file:save")
+            .bind("cmd-shift-s", "file:save-as");
+
+        let plain = press(Key::Character('s'), accel());
         assert_eq!(
-            keymap.resolve(&[], &[], &press(Key::Character('p'), modifiers)),
-            Match::Command("command:palette".into())
+            keymap.resolve(&[], &[], &plain),
+            Match::Command("file:save".into())
+        );
+
+        let shifted = press(
+            Key::Character('s'),
+            Modifiers { shift: true, ..accel() },
+        );
+        assert_eq!(
+            keymap.resolve(&[], &[], &shifted),
+            Match::Command("file:save-as".into())
         );
     }
 
@@ -676,6 +706,30 @@ mod tests {
             keymap.resolve(&[], &[], &press(Key::Tab, Modifiers::default())),
             Match::None
         );
+    }
+
+    #[test]
+    fn a_menu_can_ask_what_key_runs_a_command() {
+        let keymap = Keymap::new()
+            .bind("cmd-s", "file:save")
+            .bind("cmd-k cmd-d", "editor:duplicate");
+        let save = keymap.shortcut_for("file:save").expect("no shortcut");
+        assert!(save.ends_with('S'), "{save}");
+        // A sequence reads as one, spaced the way it is typed.
+        let duplicate = keymap.shortcut_for("editor:duplicate").unwrap();
+        assert!(duplicate.contains(' '), "{duplicate}");
+        assert_eq!(keymap.shortcut_for("nothing:bound"), None);
+    }
+
+    #[test]
+    fn a_menu_shows_the_key_that_actually_runs_the_command() {
+        // Rebound by somebody's own keymap. The menu has to show the new key,
+        // not the one it replaced.
+        let keymap = Keymap::new()
+            .bind("cmd-p", "command:palette")
+            .bind("cmd-shift-p", "command:palette");
+        let shown = keymap.shortcut_for("command:palette").unwrap();
+        assert!(shown.contains("Shift"), "showed the overridden key: {shown}");
     }
 
     #[test]
