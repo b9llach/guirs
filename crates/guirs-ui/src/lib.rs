@@ -72,6 +72,7 @@ pub mod element;
 pub mod event;
 pub mod icon;
 pub mod image;
+pub mod keymap;
 pub mod input;
 pub mod layout;
 pub mod model;

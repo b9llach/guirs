@@ -31,6 +31,16 @@ impl Modifiers {
         !self.shift && !self.control && !self.alt && !self.meta
     }
 
+    /// Whether the accelerator on this platform is the Control key.
+    ///
+    /// Everywhere except macOS. Worth asking rather than assuming: a binding
+    /// that means Control has to know whether that is already the accelerator,
+    /// or it ends up demanding the same key twice.
+    #[inline]
+    pub fn accelerator_is_control() -> bool {
+        !cfg!(target_os = "macos")
+    }
+
     /// The platform's usual accelerator modifier: Command on macOS, Control
     /// elsewhere. Checking this instead of `control` is what makes a shortcut
     /// feel native on both.
