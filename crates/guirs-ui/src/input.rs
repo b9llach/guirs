@@ -834,10 +834,7 @@ impl InputRouter {
 /// one behind it, which is what lets a list of tabs sit inside a pane that
 /// also accepts drops.
 fn drop_target_at(cx: &Cx, position: Point<Px>) -> Option<GlobalElementId> {
-    let kind = match cx.input.drag.dragged() {
-        Some(dragged) => dragged.kind.clone(),
-        None => return None,
-    };
+    let kind = cx.input.drag.dragged()?.kind.clone();
     cx.chain_at(position).iter().find_map(|region| {
         let handlers = cx.handlers.get(&region.id)?;
         handlers
