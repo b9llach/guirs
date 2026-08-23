@@ -256,18 +256,29 @@ impl Element for Text {
                 SelectableText {
                     origin: content.origin,
                     layout: laid_out.clone(),
+                    // Counted as runs are registered, which happens in paint
+                    // order, which is reading order.
+                    order: cx.selectable.len() as u32,
                 },
             );
 
             // The highlight goes down before the glyphs, so the text stays
             // readable on top of it.
             if let Some(selection) = cx.input.text_selection {
-                if selection.id == self.global_id && !selection.is_empty() {
+                // Asked by position rather than by identity: a selection that
+                // began in another run still covers this one, and asking
+                // whether this is the run it started in would highlight only
+                // the first paragraph of several.
+                let order = cx.selectable.get(&self.global_id).map(|text| text.order);
+                let covered = order.and_then(|order| {
+                    selection.range_in(order, laid_out.text.len())
+                });
+                if let Some(range) = covered {
                     let highlight = cx
                         .styles
                         .color_token("selection")
                         .unwrap_or_else(|| Rgba::rgba8(108, 92, 231, 110));
-                    for rect in laid_out.selection_rects(selection.range()) {
+                    for rect in laid_out.selection_rects(range) {
                         cx.scene.push_quad(Quad {
                             bounds: rect.translate(content.origin),
                             corner_radii: Corners::all(Px(2.0)),

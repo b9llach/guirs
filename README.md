@@ -567,6 +567,13 @@ correct when a line wraps or mixes directions.
 Selection is off by default because most text in an interface is a label, and
 making labels selectable turns every stray drag into a highlight.
 
+A sweep that leaves one run carries on into the next. Runs are numbered as they
+are painted, which is reading order, and that ordering is what makes a
+selection spanning several of them meaningful: the run it starts in gives up
+its beginning, the one it ends in gives up its end, and everything between is
+taken whole. Copying them puts each on its own line, because separate runs are
+separate blocks of text rather than one sentence.
+
 Text fields get the same treatment without asking: click to place the caret,
 sweep to select, double click for a word, and cut, copy, paste and select all
 on the platform shortcuts. The window owns that rather than the widget, because
@@ -1090,10 +1097,6 @@ one that does less:
 - **Group opacity.** `opacity` multiplies down the tree per element rather than
   compositing the subtree once, so overlapping translucent children show through
   each other.
-- **Selection across elements.** Selecting within one block covers copying a
-  message or a code sample. Spanning separate elements needs a total ordering
-  over the tree and a notion of what lies between two runs, which is a larger
-  piece of work than it looks.
 - **`em` units.** `rem`, `px` and `%` are supported.
 - **3D transforms.** `translate`, `rotate` and `scale` are there and they
   animate. Perspective, `rotateX` and `rotateY` are not.

@@ -169,6 +169,12 @@ pub struct SelectableText {
     /// Where the text's content box starts, in window coordinates.
     pub origin: Point<Px>,
     pub layout: std::sync::Arc<guirs_text::TextLayout>,
+    /// Which run of text this is, counting in the order they were painted.
+    ///
+    /// Paint order is reading order, and reading order is what a selection
+    /// spanning several runs needs: without it there is no way to say which
+    /// of two runs comes first, and so no way to say what lies between them.
+    pub order: u32,
 }
 
 impl std::fmt::Debug for SelectableText {
@@ -193,6 +199,10 @@ pub struct TextSelection {
     pub anchor: usize,
     /// Where the pointer is now. May be before the anchor.
     pub head: usize,
+    /// The run the selection started in, in paint order.
+    pub anchor_run: u32,
+    /// The run the pointer is in now.
+    pub head_run: u32,
 }
 
 impl TextSelection {
@@ -203,7 +213,46 @@ impl TextSelection {
 
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.anchor == self.head
+        self.anchor_run == self.head_run && self.anchor == self.head
+    }
+
+    /// Whether this selection reaches beyond the run it began in.
+    #[inline]
+    pub fn spans_runs(&self) -> bool {
+        self.anchor_run != self.head_run
+    }
+
+    /// The two ends in reading order, as `(run, offset)` pairs.
+    ///
+    /// A selection is swept out from wherever it started, so the pointer is
+    /// often before the anchor. Everything downstream wants them the other way
+    /// round.
+    pub fn ordered(&self) -> ((u32, usize), (u32, usize)) {
+        let a = (self.anchor_run, self.anchor);
+        let b = (self.head_run, self.head);
+        if a <= b {
+            (a, b)
+        } else {
+            (b, a)
+        }
+    }
+
+    /// What part of one run is selected, given how long that run is.
+    ///
+    /// The run the selection starts in gives up its beginning, the one it ends
+    /// in gives up its end, everything between is taken whole, and anything
+    /// outside gives nothing.
+    pub fn range_in(&self, run: u32, len: usize) -> Option<std::ops::Range<usize>> {
+        let ((first_run, first_at), (last_run, last_at)) = self.ordered();
+        if run < first_run || run > last_run {
+            return None;
+        }
+        let start = if run == first_run { first_at.min(len) } else { 0 };
+        let end = if run == last_run { last_at.min(len) } else { len };
+        if start >= end {
+            return None;
+        }
+        Some(start..end)
     }
 }
 
@@ -1218,16 +1267,55 @@ impl Cx {
         Some(text.layout.index_for_position(local))
     }
 
+    /// Which run of selectable text is under a point, and where in it.
+    ///
+    /// Falls back to the nearest run when the pointer is over none of them,
+    /// so sweeping a selection through the space between two paragraphs
+    /// carries on rather than stopping at the gap.
+    pub fn selection_point_at(&self, point: Point<Px>) -> Option<(u32, usize)> {
+        let mut best: Option<(f32, u32, usize)> = None;
+        for text in self.selectable.values() {
+            let local = Point::new(point.x - text.origin.x, point.y - text.origin.y);
+            let index = text.layout.index_for_position(local);
+            // How far outside this run the pointer is. Zero while inside it,
+            // so a run actually under the pointer always wins.
+            let size = text.layout.size;
+            let dx = (-local.x.0).max(local.x.0 - size.width.0).max(0.0);
+            let dy = (-local.y.0).max(local.y.0 - size.height.0).max(0.0);
+            let distance = dx.hypot(dy);
+            if best.is_none_or(|(closest, _, _)| distance < closest) {
+                best = Some((distance, text.order, index));
+            }
+        }
+        best.map(|(_, run, index)| (run, index))
+    }
+
     /// The currently selected text, ready to be copied.
     pub fn selected_text(&self) -> Option<String> {
         let selection = self.input.text_selection?;
-        let text = self.selectable.get(&selection.id)?;
-        let range = selection.range();
-        let content = text.layout.text.as_str();
-        if range.start >= range.end || range.end > content.len() {
+        if selection.is_empty() {
             return None;
         }
-        Some(content[range].to_string())
+
+        // Gathered in reading order rather than in whatever order the runs
+        // happen to be stored, because a hash map has none.
+        let mut runs: Vec<&SelectableText> = self.selectable.values().collect();
+        runs.sort_by_key(|text| text.order);
+
+        let mut out = String::new();
+        for text in runs {
+            let content = text.layout.text.as_str();
+            let Some(range) = selection.range_in(text.order, content.len()) else {
+                continue;
+            };
+            if !out.is_empty() {
+                // Separate runs are separate blocks of text, so they arrive
+                // on separate lines rather than run together into one word.
+                out.push('\n');
+            }
+            out.push_str(&content[range]);
+        }
+        (!out.is_empty()).then_some(out)
     }
 
     /// The editable field under a point, innermost first.

@@ -190,12 +190,14 @@ impl InputRouter {
                         });
                         out.redraw = true;
                     }
-                } else if let Some(id) = self.selecting {
+                } else if self.selecting.is_some() {
                     // Sweeping out a selection. The end moves, the start does
-                    // not, and the pointer may wander outside the text.
-                    if let Some(index) = cx.text_index_at(id, mouse.position) {
+                    // not, and the pointer may wander out of the run it began
+                    // in and into another one entirely.
+                    if let Some((run, index)) = cx.selection_point_at(mouse.position) {
                         if let Some(selection) = &mut cx.input.text_selection {
-                            if selection.id == id && selection.head != index {
+                            if selection.head_run != run || selection.head != index {
+                                selection.head_run = run;
                                 selection.head = index;
                                 out.redraw = true;
                             }
@@ -332,7 +334,14 @@ impl InputRouter {
                             (line.start, line.end)
                         }
                     };
-                    cx.input.text_selection = Some(TextSelection { id, anchor, head });
+                    let run = cx.selectable.get(&id).map(|text| text.order).unwrap_or(0);
+                    cx.input.text_selection = Some(TextSelection {
+                        id,
+                        anchor,
+                        head,
+                        anchor_run: run,
+                        head_run: run,
+                    });
                     self.selecting = Some(id);
                 } else {
                     cx.input.text_selection = None;
@@ -1460,6 +1469,137 @@ mod tests {
         let thumb = harness.cx.scrollbars[0].thumb;
         harness.click(thumb.center().x.0, thumb.center().y.0);
         assert_eq!(clicks.get(), 0, "the row under the scrollbar must not click");
+    }
+
+    // -- selection across runs ---------------------------------------------
+
+    fn selection(anchor_run: u32, anchor: usize, head_run: u32, head: usize) -> TextSelection {
+        TextSelection {
+            id: GlobalElementId(0),
+            anchor,
+            head,
+            anchor_run,
+            head_run,
+        }
+    }
+
+    #[test]
+    fn a_selection_inside_one_run_covers_only_that_run() {
+        let sel = selection(1, 2, 1, 6);
+        assert_eq!(sel.range_in(1, 20), Some(2..6));
+        assert_eq!(sel.range_in(0, 20), None);
+        assert_eq!(sel.range_in(2, 20), None);
+    }
+
+    #[test]
+    fn a_run_between_the_ends_is_taken_whole() {
+        // The first run gives up its beginning, the last gives up its end,
+        // and everything in between is selected entirely.
+        let sel = selection(0, 4, 2, 3);
+        assert_eq!(sel.range_in(0, 10), Some(4..10), "the first run");
+        assert_eq!(sel.range_in(1, 10), Some(0..10), "a run in the middle");
+        assert_eq!(sel.range_in(2, 10), Some(0..3), "the last run");
+        assert_eq!(sel.range_in(3, 10), None, "past the end");
+    }
+
+    #[test]
+    fn sweeping_backwards_selects_the_same_thing() {
+        // A selection is swept out from wherever it started, so the pointer is
+        // often before the anchor. It has to mean the same either way.
+        let forwards = selection(0, 4, 2, 3);
+        let backwards = selection(2, 3, 0, 4);
+        for run in 0..3 {
+            assert_eq!(
+                forwards.range_in(run, 10),
+                backwards.range_in(run, 10),
+                "run {run} differs by direction"
+            );
+        }
+    }
+
+    #[test]
+    fn an_offset_past_the_end_of_a_run_is_pulled_back() {
+        // Runs are different lengths, and an offset taken from a long one
+        // must not index past the end of a short one.
+        let sel = selection(0, 2, 1, 900);
+        assert_eq!(sel.range_in(1, 10), Some(0..10));
+    }
+
+    #[test]
+    fn an_empty_selection_covers_nothing() {
+        assert_eq!(selection(1, 5, 1, 5).range_in(1, 20), None);
+        assert!(selection(1, 5, 1, 5).is_empty());
+    }
+
+    #[test]
+    fn a_selection_that_reaches_another_run_is_not_empty() {
+        // Same offset in two different runs is a real selection: everything
+        // between them is in it.
+        let sel = selection(0, 5, 2, 5);
+        assert!(!sel.is_empty());
+        assert!(sel.spans_runs());
+        assert_eq!(sel.range_in(1, 10), Some(0..10));
+    }
+
+    #[test]
+    fn copying_across_runs_keeps_them_in_reading_order() {
+        let mut harness = Harness::new();
+        harness.frame(
+            div()
+                .size_full()
+                .child(text("first line").selectable())
+                .child(text("second line").selectable())
+                .child(text("third line").selectable())
+                .into_any(),
+        );
+
+        // From part way through the first to part way through the third.
+        harness.cx.input.text_selection = Some(selection(0, 6, 2, 5));
+        assert_eq!(
+            harness.cx.selected_text().as_deref(),
+            Some("line
+second line
+third")
+        );
+    }
+
+    #[test]
+    fn copying_a_selection_that_never_left_one_run_yields_that_run() {
+        let mut harness = Harness::new();
+        harness.frame(
+            div()
+                .size_full()
+                .child(text("first line").selectable())
+                .child(text("second line").selectable())
+                .into_any(),
+        );
+        harness.cx.input.text_selection = Some(selection(1, 0, 1, 6));
+        assert_eq!(harness.cx.selected_text().as_deref(), Some("second"));
+    }
+
+    #[test]
+    fn runs_are_numbered_in_the_order_they_are_painted() {
+        // Reading order is what a selection spanning runs is defined against,
+        // and a hash map has no order of its own.
+        let mut harness = Harness::new();
+        harness.frame(
+            div()
+                .size_full()
+                .child(text("alpha").selectable())
+                .child(text("bravo").selectable())
+                .child(text("charlie").selectable())
+                .into_any(),
+        );
+
+        let mut runs: Vec<(u32, String)> = harness
+            .cx
+            .selectable
+            .values()
+            .map(|text| (text.order, text.layout.text.to_string()))
+            .collect();
+        runs.sort_by_key(|(order, _)| *order);
+        let words: Vec<&str> = runs.iter().map(|(_, word)| word.as_str()).collect();
+        assert_eq!(words, ["alpha", "bravo", "charlie"]);
     }
 
     // -- grid --------------------------------------------------------------
