@@ -728,9 +728,14 @@ impl InputRouter {
                 if !text.is_empty() {
                     editor.state.update(|state| state.insert(&text));
                     out.redraw = true;
+                    return true;
                 }
             }
-            return true;
+            // Nothing went in, so this was not a paste the field handled, and
+            // the key travels on to whatever else is listening. That is what
+            // lets an application paste a picture: the clipboard holding one
+            // and no text is exactly the case that reaches here.
+            return false;
         }
 
         false

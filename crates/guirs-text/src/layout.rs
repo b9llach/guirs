@@ -813,8 +813,13 @@ impl TextSystem {
 
         let tail_end = text.len();
         if line_start < tail_end || out.is_empty() {
-            let end = content_end.max(line_start);
-            out.push(offset + line_start..offset + end.min(tail_end));
+            // The last line keeps its trailing whitespace. A break swallows
+            // the spaces before it, which is why `content_end` stops at the
+            // last non-space, but nothing breaks after the end of the text:
+            // those spaces are characters somebody has just typed. Cutting
+            // them here leaves the caret unable to move past a space, so a
+            // field looks like it is ignoring the key.
+            out.push(offset + line_start..offset + tail_end);
         }
 
         let _ = source;
@@ -1396,5 +1401,81 @@ mod tests {
         assert_eq!(layout.index_for_position(Point::new(Px(50.0), Px(50.0))), 0);
         assert_eq!(layout.position_for_index(10), Point::zero());
         assert_eq!(layout.line_at(Px(100.0)), 0);
+    }
+}
+
+#[cfg(test)]
+mod trailing_space_tests {
+    use super::*;
+
+    /// Where the caret sits at the end of a string, in a field that preserves
+    /// whitespace.
+    fn caret_x(text: &str) -> f32 {
+        // Real fonts, or every measurement is zero and the test cannot tell
+        // a moving caret from a stuck one.
+        let mut system = TextSystem::new();
+        system.fonts.load_system_fonts();
+        let layout = system.layout_str(
+            text,
+            &TextStyle::default(),
+            &LayoutOptions {
+                white_space: WhiteSpace::Pre,
+                ..Default::default()
+            },
+        );
+        layout.position_for_index(text.len()).x.0
+    }
+
+    /// The caret at the end of a string, in a wrapping field like a text area.
+    fn wrapping_caret_x(text: &str) -> f32 {
+        let mut system = TextSystem::new();
+        system.fonts.load_system_fonts();
+        let layout = system.layout_str(
+            text,
+            &TextStyle::default(),
+            &LayoutOptions {
+                white_space: WhiteSpace::PreWrap,
+                max_width: Some(Px(400.0)),
+                ..Default::default()
+            },
+        );
+        layout.position_for_index(text.len()).x.0
+    }
+
+    #[test]
+    fn the_caret_moves_when_a_space_is_typed_into_a_wrapping_field() {
+        // A text area wraps, and a line's trailing whitespace is normally
+        // dropped at a wrap point. That must not apply to whitespace somebody
+        // is in the middle of typing at the end of the text.
+        let none = wrapping_caret_x("ab");
+        let one = wrapping_caret_x("ab ");
+        let four = wrapping_caret_x("ab    ");
+        assert!(one > none, "one space did not move the caret: {none} -> {one}");
+        assert!(four > one, "more spaces did not move it: {one} -> {four}");
+    }
+
+    #[test]
+    fn a_trailing_space_survives_being_laid_out() {
+        let mut system = TextSystem::new();
+        let layout = system.layout_str(
+            "ab  ",
+            &TextStyle::default(),
+            &LayoutOptions {
+                white_space: WhiteSpace::Pre,
+                ..Default::default()
+            },
+        );
+        assert_eq!(layout.text.as_str(), "ab  ", "the spaces were dropped");
+    }
+
+    #[test]
+    fn the_caret_moves_when_a_space_is_typed() {
+        // Typing a space at the end of a field has to move the caret, or the
+        // field looks like it swallowed the key.
+        let none = caret_x("ab");
+        let one = caret_x("ab ");
+        let two = caret_x("ab  ");
+        assert!(one > none, "one space did not move the caret: {none} -> {one}");
+        assert!(two > one, "a second space did not move it: {one} -> {two}");
     }
 }
