@@ -253,6 +253,10 @@ impl InstanceBuffer {
 
 struct ImageMeta {
     slot: AtlasSlot,
+    /// The last frame this was drawn in. What decides whether the atlas is
+    /// full of things still being looked at or full of things nobody has
+    /// asked for in a while.
+    last_used: u64,
 }
 
 /// Maps gradients to rows of the ramp texture.
@@ -818,8 +822,45 @@ impl Renderer {
         self.ensure_image_layers(slot.page as u32 + 1);
 
         write_layer(&self.queue, &self.image_texture, slot, rgba, 4);
-        self.images.insert(id, ImageMeta { slot });
+        self.images.insert(
+            id,
+            ImageMeta {
+                slot,
+                last_used: self.frame_index,
+            },
+        );
         Some(id)
+    }
+
+    /// Empty the picture atlas so something new can be packed into it.
+    ///
+    /// Returns everything that was in it, which is now gone. The packer only
+    /// ever appends, so the space a picture occupied cannot be handed back on
+    /// its own: reclaiming any of it means reclaiming all of it, and whatever
+    /// is still wanted has to be uploaded again.
+    ///
+    /// Refuses when every picture in the atlas has been drawn since
+    /// `stale_before`. An atlas full of pictures somebody is still looking at
+    /// is not a cache that needs clearing, and emptying it would only mean
+    /// decoding them all again to draw the same frame.
+    pub fn flush_images(&mut self, stale_before: u64) -> Vec<ImageId> {
+        if self.images.is_empty() {
+            return Vec::new();
+        }
+        if !worth_flushing(self.images.values().map(|meta| meta.last_used), stale_before) {
+            return Vec::new();
+        }
+
+        let flushed: Vec<ImageId> = self.images.keys().copied().collect();
+        self.images.clear();
+        self.image_atlas.reset();
+        log::debug!("image atlas flushed, {} pictures dropped", flushed.len());
+        flushed
+    }
+
+    /// Whether the picture atlas has no more room to give.
+    pub fn images_are_full(&self) -> bool {
+        self.image_atlas.is_under_pressure()
     }
 
     /// Size of a previously added image, in texels.
@@ -1388,7 +1429,9 @@ impl Renderer {
     }
 
     fn prepare_image(&mut self, image: &Image) -> Option<SpriteInstance> {
-        let meta = self.images.get(&image.id)?;
+        let frame = self.frame_index;
+        let meta = self.images.get_mut(&image.id)?;
+        meta.last_used = frame;
         let slot = meta.slot;
         Some(SpriteInstance {
             bounds: [
@@ -1413,6 +1456,16 @@ impl Renderer {
             ..SpriteInstance::default()
         })
     }
+}
+
+/// Whether emptying the picture atlas would free anything worth having.
+///
+/// Only if something in it has gone unwanted. An atlas full of pictures
+/// somebody is still looking at is not a cache in need of clearing: emptying
+/// it frees nothing that stays free, because every one of them has to be
+/// decoded again to draw the very next frame.
+fn worth_flushing(last_used: impl IntoIterator<Item = u64>, stale_before: u64) -> bool {
+    last_used.into_iter().any(|used| used < stale_before)
 }
 
 /// Narrow a slot's texture coordinates to the part of the image being drawn.
@@ -1699,6 +1752,32 @@ fn write_layer(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_atlas_still_in_use_is_not_flushed() {
+        // Every picture drawn recently. Emptying frees nothing that stays
+        // free: all of them are decoded again to draw the next frame, and the
+        // atlas is just as full a moment later.
+        assert!(!worth_flushing([100u64, 101, 102], 60));
+    }
+
+    #[test]
+    fn an_atlas_holding_something_nobody_wants_is_worth_flushing() {
+        assert!(worth_flushing([100u64, 3, 102], 60));
+    }
+
+    #[test]
+    fn an_empty_atlas_is_not_worth_flushing() {
+        assert!(!worth_flushing([], 60));
+    }
+
+    #[test]
+    fn the_cutoff_is_the_boundary_it_says_it_is() {
+        // Drawn exactly at the cutoff counts as still wanted, so a picture is
+        // never thrown away on the very frame it stops being new.
+        assert!(!worth_flushing([60u64], 60));
+        assert!(worth_flushing([59u64], 60));
+    }
+
     use super::*;
     use guirs_core::Rgba;
 

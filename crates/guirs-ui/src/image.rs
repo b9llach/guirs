@@ -281,6 +281,22 @@ impl ImageStore {
         self.entries.insert(key, Entry::Failed(error));
     }
 
+    /// Forget pictures the graphics device no longer holds.
+    ///
+    /// Anything still wanted is read and decoded again the next time it is
+    /// asked for, which is the frame after this one. Failures are left alone:
+    /// a file that could not be read will not read any better for having its
+    /// texture reclaimed, and retrying it every flush would be a loop.
+    pub fn forget(&mut self, ids: &[ImageId]) {
+        if ids.is_empty() {
+            return;
+        }
+        self.entries.retain(|_, entry| match entry {
+            Entry::Ready { id, .. } => !ids.contains(id),
+            _ => true,
+        });
+    }
+
     /// Whether anything finished loading and is waiting to be drawn.
     pub fn has_pending(&self) -> bool {
         self.changed
@@ -769,6 +785,55 @@ mod tests {
         assert_eq!(aspect_for(false, true, None), None);
         // And one with no height cannot produce a ratio at all.
         assert_eq!(aspect_for(false, true, Some((320, 0))), None);
+    }
+
+    #[test]
+    fn a_forgotten_picture_is_asked_for_again() {
+        // The atlas was emptied, so the texture is gone. Anything still
+        // wanted has to be read and decoded again rather than drawn from a
+        // handle that no longer refers to anything.
+        let mut store = ImageStore::default();
+        let source = ImageSource::from("a/b.png");
+        store
+            .entries
+            .insert(source.key(), Entry::Ready { id: ImageId(3), size: (8, 8) });
+        assert!(matches!(store.request(&source), ImageStatus::Ready { .. }));
+
+        store.forget(&[ImageId(3)]);
+        assert_eq!(store.len(), 0, "the dead handle was kept");
+        // Asking again starts the work over rather than handing back nothing.
+        assert_eq!(store.request(&source), ImageStatus::Loading);
+    }
+
+    #[test]
+    fn forgetting_leaves_other_pictures_alone() {
+        let mut store = ImageStore::default();
+        let kept = ImageSource::from("kept.png");
+        let dropped = ImageSource::from("dropped.png");
+        store
+            .entries
+            .insert(kept.key(), Entry::Ready { id: ImageId(1), size: (8, 8) });
+        store
+            .entries
+            .insert(dropped.key(), Entry::Ready { id: ImageId(2), size: (8, 8) });
+
+        store.forget(&[ImageId(2)]);
+        assert!(matches!(store.request(&kept), ImageStatus::Ready { .. }));
+        assert_eq!(store.len(), 1);
+    }
+
+    #[test]
+    fn forgetting_does_not_retry_something_that_failed() {
+        // A file that could not be read will not read any better for having
+        // its texture reclaimed, and retrying it on every flush is a loop.
+        let mut store = ImageStore::default();
+        let missing = ImageSource::from("missing.png");
+        store.entries.insert(
+            missing.key(),
+            Entry::Failed(ImageError::Unreadable("gone".into())),
+        );
+        store.forget(&[ImageId(1), ImageId(2)]);
+        assert!(matches!(store.request(&missing), ImageStatus::Failed(_)));
     }
 
     #[test]

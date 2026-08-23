@@ -900,6 +900,18 @@ nothing. Anything larger than a page is scaled down to fit rather than refused,
 which is usually invisible: a photograph from a camera is several times the
 size of any box it will be drawn into.
 
+**Running out of room.** The packer only ever appends, so the space one
+picture occupies cannot be handed back on its own: reclaiming any of it means
+reclaiming all of it. When the atlas fills, everything in it is dropped and
+whatever is still on screen is decoded again over the next frame or two, which
+already happens off the drawing thread.
+
+That only happens if something in the atlas has gone unwanted. An atlas full of
+pictures somebody is still looking at is not a cache in need of clearing, and
+emptying it would free nothing that stays free: every one of them would be
+decoded again to draw the very next frame. So a window whose pictures are all
+in use is told there is no room, rather than being put into a loop.
+
 **Describing them.** A picture says what it shows, or says that it is
 decoration and stays out of the way entirely:
 
@@ -1090,10 +1102,6 @@ one that does less:
 - **Walking a menu with the keyboard.** A menu opens, chooses and closes with
   the pointer, and every entry is reachable through the accessibility layer,
   but the arrow keys do not yet move through an open one.
-- **Forgetting a picture.** The image atlas has no eviction, so a window that
-  shows hundreds of different pictures over a long session grows until it hits
-  the eight page limit and then refuses new ones. Enough for an interface with
-  a fixed set of imagery, not enough for a gallery scrolling through thousands.
 - **Image formats beyond PNG and JPEG.** GIF, WebP and the rest are not
   compiled in, so they do not decode at all rather than decoding poorly. The
   decoder supports them; it is a feature flag and a decision about what a

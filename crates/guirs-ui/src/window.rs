@@ -135,6 +135,13 @@ impl Window {
     }
 
     /// Build, lay out, paint and present one frame.
+    /// How long a picture goes undrawn before it is worth reclaiming.
+    ///
+    /// Around a second at sixty frames a second. Long enough that scrolling
+    /// something briefly off screen does not throw it away, short enough that
+    /// a session working through a lot of pictures does not run out of atlas.
+    const STALE_IMAGE_FRAMES: u64 = 60;
+
     pub fn draw(&mut self) {
         let (width, height) = self.renderer.size();
         let size = Size::new(Px(width), Px(height));
@@ -325,13 +332,27 @@ impl Window {
         }
         for (key, picture) in decoded {
             let (width, height) = picture.size();
-            match self.renderer.add_image(width, height, picture.pixels()) {
+            let mut id = self.renderer.add_image(width, height, picture.pixels());
+
+            if id.is_none() && self.renderer.images_are_full() {
+                // Out of room. Anything nothing has drawn for a while is
+                // worth giving up to make space; anything still on screen is
+                // read and decoded again over the next frame or two.
+                let stale_before = self.renderer.frame_index().saturating_sub(Self::STALE_IMAGE_FRAMES);
+                let flushed = self.renderer.flush_images(stale_before);
+                if !flushed.is_empty() {
+                    self.cx.images.forget(&flushed);
+                    id = self.renderer.add_image(width, height, picture.pixels());
+                }
+            }
+
+            match id {
                 Some(id) => self.cx.images.uploaded(key, id, (width, height)),
                 None => {
-                    // The atlas is a fixed size, so a picture larger than a
-                    // page cannot be held at all. Recorded as a failure rather
-                    // than retried every frame forever.
-                    log::warn!("image of {width}x{height} does not fit in the atlas");
+                    // Either larger than a page, or the atlas is full of
+                    // pictures all still being looked at. Recorded as a
+                    // failure rather than retried every frame forever.
+                    log::warn!("image of {width}x{height} could not be held");
                     self.cx
                         .images
                         .upload_failed(key, crate::image::ImageError::TooLarge { width, height });
