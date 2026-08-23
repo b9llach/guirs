@@ -151,6 +151,10 @@ window-glyph { font-size: 10px; }
     gap: 10px;
     align-items: center;
     color: var(--text);
+    /* Rows sit flush without this, so the highlight on one runs straight into
+       the highlight on the next and the two read as a single block rather
+       than as two rows. */
+    margin-bottom: 2px;
     transition: background var(--speed) ease-out;
 }
 
@@ -170,6 +174,7 @@ window-glyph { font-size: 10px; }
 .conversation {
     padding: 7px 9px;
     border-radius: var(--radius-sm);
+    margin-bottom: 2px;
     transition: background var(--speed) ease-out;
 }
 
