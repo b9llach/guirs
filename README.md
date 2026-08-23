@@ -1032,6 +1032,29 @@ of GPU acceleration and every accelerated application pays it, this one and
 Chromium alike. What a framework controls is the part above that line, and
 keeping it in single digits is the point.
 
+### Comparing this against a web view application
+
+Not the way a task manager invites you to. An application built on a web view
+is several processes, and the one carrying the application's name draws
+nothing: the rendering happens in the web view's own processes, which the task
+manager files under the runtime rather than under the application. Reading the
+row with the application's name on it therefore reports the size of a shell.
+
+Measured on one Windows machine with an NVIDIA card, against a released Tauri
+application, by private working set, which is the number a task manager shows:
+
+| | private working set |
+| --- | --- |
+| the Tauri application's own process | 10.6 MB |
+| its six web view processes | 132.9 MB |
+| **its interface, in total** | **143.5 MB** |
+| the chat application here, one process | **111.7 MB** |
+
+Two numbers rather than one, because the honest comparison is the whole tree
+against the whole process. Its shell looks small for the same reason our
+process looks large: ours is the only process we have, and the graphics driver
+lives inside it. Theirs lives in a web view process listed somewhere else.
+
 Five things were found by measuring rather than guessing:
 
 - **Every vendor's driver was loading.** Asking wgpu for all backends made it
@@ -1054,7 +1077,8 @@ Five things were found by measuring rather than guessing:
   database into a private `Vec`. Sharing the database's own data instead maps
   the file, which makes those pages file backed rather than dirty: the system
   can drop them under pressure, and two processes using the same font share one
-  copy. Measured on the release build, that is **119.5 MB down to 112.2 MB**
+  copy. Measured on the release build by private working set, that is
+  **119.5 MB down to 112.2 MB**
   for six Latin faces. A CJK face is tens of megabytes on its own, so it matters
   far more there.
 
