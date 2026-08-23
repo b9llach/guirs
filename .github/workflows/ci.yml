@@ -63,7 +63,7 @@ jobs:
 
       # Kept in step with `rust-version` in the workspace manifest. Claiming a
       # minimum without building against it is claiming nothing.
-      - uses: dtolnay/rust-toolchain@1.87.0
+      - uses: dtolnay/rust-toolchain@1.90.0
 
       - uses: Swatinem/rust-cache@v2
 

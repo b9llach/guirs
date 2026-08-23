@@ -1141,7 +1141,9 @@ one that does less:
 
 ## Building and testing
 
-Rust 1.87 or newer, which is what wgpu 30 asks for.
+Rust 1.90 or newer. Set by dependencies rather than by anything here:
+`ordered-float` asks for 1.90 and `image` for 1.88, both above the 1.87 wgpu
+wants.
 
 ```
 cargo build --workspace

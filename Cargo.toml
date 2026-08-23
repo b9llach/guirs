@@ -15,9 +15,10 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-# Set by wgpu 30, which declares 1.87, and by a transitive dependency using
-# edition 2024. Claiming anything lower would be claiming something untrue.
-rust-version = "1.87"
+# Set by dependencies rather than by anything here: ordered-float asks for
+# 1.90 and image for 1.88, both above wgpu's 1.87. Claiming anything lower
+# would be claiming something untrue, and cargo refuses the build outright.
+rust-version = "1.90"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/b9llach/guirs"
 authors = ["guirs contributors"]
