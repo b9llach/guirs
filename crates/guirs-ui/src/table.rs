@@ -10,7 +10,8 @@
 //! let state = Model::new(TableState::default());
 //! let columns = [table_column("name", "Name").width(220.0), table_column("size", "Size")];
 //! # let rows: Vec<(String, String)> = Vec::new();
-//! table(&columns, rows.len(), state, |row, col| {
+//! let count = rows.len();
+//! table(&columns, count, state, move |row, col| {
 //!     div().child(text(match col.key().as_ref() {
 //!         "name" => rows[row].0.clone(),
 //!         _ => rows[row].1.clone(),

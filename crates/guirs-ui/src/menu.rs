@@ -8,8 +8,13 @@
 //! the two cannot drift apart.
 //!
 //! ```no_run
-//! # use guirs_ui::{menu::{menu_bar, submenu, item, separator}, Model};
-//! # let open = Model::new(None);
+//! # use guirs_ui::{
+//! #     keymap::Keymap,
+//! #     menu::{menu_bar, menu_item, menu_separator, submenu, MenuState},
+//! #     Model,
+//! # };
+//! # let open = Model::new(MenuState::default());
+//! # let keymap = Keymap::new();
 //! menu_bar(
 //!     &[
 //!         submenu("File", [
@@ -24,6 +29,7 @@
 //!         ]),
 //!     ],
 //!     open,
+//!     &keymap,
 //! );
 //! ```
 
