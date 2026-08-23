@@ -1,8 +1,11 @@
 # guirs
 
 An extensible, GPU accelerated GUI framework for Rust. No HTML, no JavaScript,
-no web view: elements are Rust values, layout is flexbox, and everything is
-drawn by two wgpu pipelines.
+no web view: elements are Rust values, layout is flexbox and grid, and
+everything is drawn by two wgpu pipelines.
+
+Menus, trees, tables, split panes, drag and drop, keymaps with chords, images,
+and a screen reader that sees a real tree, all of it in Rust.
 
 The styling system is a real cascading stylesheet language with its own parser,
 so an application can be re-themed by editing a text file while it is running.
@@ -999,8 +1002,10 @@ it. That is what the tests do, through the same paint path a window uses.
 
 ## Performance
 
-The kitchen sink demo runs at 330 to 690 frames per second in release,
-depending on how much is on screen.
+The kitchen sink demo runs at 265 to 1500 frames per second in release,
+depending on how much is on screen. The pages holding a lot of shaped text sit
+at the bottom of that range and the sparse ones at the top, which is the shape
+of the cost: laying text out is the expensive part, not drawing it.
 
 The event loop waits rather than spinning. A frame is drawn in response to
 input, to a transition in progress, or to the stylesheet changing on disk. An
@@ -1154,11 +1159,12 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo doc --workspace --no-deps
 ```
 
-438 tests. They cover the parts where being wrong is quiet rather than loud:
+612 tests. They cover the parts where being wrong is quiet rather than loud:
 selector specificity and matching, the cascade, variable resolution and cycles,
 transition retargeting and interruption, atlas packing overlap, scene batching,
-culling and layer ordering, flexbox translation, element identity stability, and
-text editing across multi byte characters.
+culling and layer ordering, flexbox and grid translation, element identity
+stability, text editing across multi byte characters, which keys mean what and
+where, and what part of a selection covers which run of text.
 
 Several of them exist because they caught something. A right to left phrase with
 a bold word in it came out with the two halves the wrong way round, because

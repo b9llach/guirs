@@ -279,10 +279,10 @@ fn section(title: &str, subtitle: &str) -> Div {
 
 fn overview_section(state: &State) -> Div {
     let stats: [(&str, &str); 4] = [
-        ("6", "crates"),
-        ("438", "tests"),
+        ("7", "crates"),
+        ("612", "tests"),
         ("2", "shaders"),
-        ("21", "widgets"),
+        ("34", "widgets"),
     ];
 
     page()
