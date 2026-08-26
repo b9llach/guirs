@@ -46,6 +46,15 @@
 //! count, because one entry is a word and another is a wrapped paragraph.
 //! [`TextSystem::trim_caches`] enforces that and is meant to be called once a
 //! frame.
+//!
+//! Once a frame, and only once a frame, because the frame being drawn is the
+//! one thing eviction may not touch. Layout measures a block several times
+//! over while it settles on a width, so dropping what is on screen to stay
+//! under a budget only means laying it out again a few calls later. A list
+//! long enough that its text alone passes the budget would then miss on
+//! nearly every lookup and re-shape everything many times per frame. What the
+//! current frame has asked for is kept whatever it costs; everything else
+//! goes at the boundary.
 
 pub mod font;
 pub mod layout;

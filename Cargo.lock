@@ -1154,6 +1154,7 @@ dependencies = [
  "fontdb",
  "guirs-core",
  "guirs-style",
+ "log",
  "smallvec",
  "swash",
  "unicode-bidi",

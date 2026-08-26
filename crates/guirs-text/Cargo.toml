@@ -11,6 +11,7 @@ authors.workspace = true
 [dependencies]
 guirs-core.workspace = true
 guirs-style.workspace = true
+log.workspace = true
 ahash.workspace = true
 smallvec.workspace = true
 fontdb.workspace = true

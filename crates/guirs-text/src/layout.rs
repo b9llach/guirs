@@ -307,18 +307,28 @@ fn next_cluster(text: &str, from: usize) -> usize {
     index
 }
 
-/// How much the laid out block cache may hold before it is dropped wholesale.
+/// How much the laid out block cache aims to hold.
 ///
 /// A count is the wrong bound. One entry is a word and another is a wrapped
 /// paragraph of a hundred lines, so four thousand entries is anywhere between
 /// a megabyte and forty. Bytes are what has to stay bounded, so bytes are what
 /// is counted.
 ///
-/// The cache is cleared wholesale rather than evicted from. Anything still on
-/// screen is laid out again on the next frame, and a proper eviction policy
-/// costs more bookkeeping than it saves for a cache whose working set is one
-/// screenful.
+/// A target rather than a hard limit, and enforced only at a frame boundary.
+/// What the frame being laid out right now has already asked for is never
+/// thrown away, however far over this that puts the total. Dropping it would
+/// mean laying the same block out again a few calls later, in the same frame,
+/// which is not a saving of anything.
 const LAYOUT_CACHE_BUDGET: usize = 2 * 1024 * 1024;
+
+/// The point at which even one frame's own working set is too much to keep.
+///
+/// Reaching this means a single frame laid out tens of thousands of blocks,
+/// which is what happens when a very long list is built in full rather than
+/// virtualized. Holding all of it would trade an unbounded amount of memory
+/// for the speed of a screen nobody can read at once, so past here the cache
+/// is dropped wholesale and the frame pays full price.
+const LAYOUT_CACHE_CEILING: usize = 32 * 1024 * 1024;
 
 /// Fonts, shaping and rasterization, wired together.
 #[derive(Debug, Default)]
@@ -333,15 +343,28 @@ pub struct TextSystem {
     /// layout, once while painting. Across frames nothing changes at all for
     /// static text, so this turns the steady state cost of text into a hash
     /// lookup.
-    layout_cache: HashMap<(SharedString, TextStyle, LayoutOptions), Arc<TextLayout>>,
+    layout_cache: HashMap<(SharedString, TextStyle, LayoutOptions), CacheEntry>,
     /// The same, for blocks carrying spans. Kept apart from the plain cache so
     /// that laying out ordinary text never pays for an empty span table.
-    rich_cache: HashMap<(RichText, TextStyle, LayoutOptions), Arc<TextLayout>>,
+    rich_cache: HashMap<(RichText, TextStyle, LayoutOptions), CacheEntry>,
     /// Roughly what the two caches above are holding, tallied as entries go in
     /// rather than measured by walking them, which a frame cannot afford.
     layout_bytes: usize,
+    /// Which frame is being laid out, so eviction can tell what is on screen
+    /// now from what was on screen a moment ago.
+    frame: u64,
     cache_hits: u64,
     cache_misses: u64,
+}
+
+/// A laid out block, with what it cost and when it was last wanted.
+#[derive(Debug, Clone)]
+struct CacheEntry {
+    layout: Arc<TextLayout>,
+    /// Roughly what this entry adds to `layout_bytes`, remembered so that
+    /// evicting it can subtract exactly what inserting it added.
+    cost: usize,
+    last_used: u64,
 }
 
 impl TextSystem {
@@ -353,6 +376,7 @@ impl TextSystem {
             layout_cache: HashMap::new(),
             rich_cache: HashMap::new(),
             layout_bytes: 0,
+            frame: 0,
             cache_hits: 0,
             cache_misses: 0,
         }
@@ -396,15 +420,55 @@ impl TextSystem {
         self.shaper.clear_cache();
     }
 
-    /// Drop cached work if either cache has grown past its budget.
+    /// Drop cached work the frame just finished did not ask for.
     ///
-    /// Called once a frame. Both caches are keyed by the text itself, so a
-    /// session that shows a lot of different strings, a log or a counter that
-    /// ticks, fills them with entries that will never be asked for again.
+    /// Called once a frame, at the end of one. Both caches are keyed by the
+    /// text itself, so a session that shows a lot of different strings, a log
+    /// or a counter that ticks, fills them with entries that will never be
+    /// asked for again.
+    ///
+    /// Only entries older than the frame that just ran are dropped. Evicting
+    /// anything the current frame has used would be self defeating: the block
+    /// is measured several times over while layout settles on a width, so what
+    /// was thrown away to make room is asked for again a few calls later, in
+    /// the same frame, and laid out from scratch each time. Enforcing the
+    /// budget from inside the insert did exactly that, and turned a screenful
+    /// of text that no longer fit the budget from a cache that held it into
+    /// one that missed on nearly every lookup.
     pub fn trim_caches(&mut self) {
         if self.layout_bytes > LAYOUT_CACHE_BUDGET {
-            self.clear_layout_caches();
+            let frame = self.frame;
+            let mut live = 0;
+            self.layout_cache.retain(|_, entry| {
+                let keep = entry.last_used == frame;
+                if keep {
+                    live += entry.cost;
+                }
+                keep
+            });
+            self.rich_cache.retain(|_, entry| {
+                let keep = entry.last_used == frame;
+                if keep {
+                    live += entry.cost;
+                }
+                keep
+            });
+            self.layout_bytes = live;
+
+            // What one frame alone wants is over the ceiling, so keeping it is
+            // no longer a bounded amount of memory. Nothing on screen can be
+            // read all at once at this size; the list wanting it should be
+            // virtualized.
+            if self.layout_bytes > LAYOUT_CACHE_CEILING {
+                log::warn!(
+                    "one frame laid out {} bytes of text, past the {} byte ceiling; virtualize the list that built it",
+                    self.layout_bytes,
+                    LAYOUT_CACHE_CEILING,
+                );
+                self.clear_layout_caches();
+            }
         }
+        self.frame += 1;
         self.shaper.trim_cache();
     }
 
@@ -435,20 +499,27 @@ impl TextSystem {
         options: &LayoutOptions,
     ) -> Arc<TextLayout> {
         let key = (text.clone(), style.clone(), options.clone());
-        if let Some(cached) = self.layout_cache.get(&key) {
+        let frame = self.frame;
+        if let Some(cached) = self.layout_cache.get_mut(&key) {
+            // Touched, so the frame boundary knows this one is on screen.
+            cached.last_used = frame;
             self.cache_hits += 1;
-            return cached.clone();
+            return cached.layout.clone();
         }
 
         self.cache_misses += 1;
         let laid_out = Arc::new(self.layout_uncached(text, style, options));
 
         let cost = text.len() + laid_out_bytes(&laid_out);
-        if self.layout_bytes + cost > LAYOUT_CACHE_BUDGET {
-            self.clear_layout_caches();
-        }
         self.layout_bytes += cost;
-        self.layout_cache.insert(key, laid_out.clone());
+        self.layout_cache.insert(
+            key,
+            CacheEntry {
+                layout: laid_out.clone(),
+                cost,
+                last_used: frame,
+            },
+        );
         laid_out
     }
 
@@ -475,9 +546,11 @@ impl TextSystem {
         }
 
         let key = (rich.clone(), style.clone(), options.clone());
-        if let Some(cached) = self.rich_cache.get(&key) {
+        let frame = self.frame;
+        if let Some(cached) = self.rich_cache.get_mut(&key) {
+            cached.last_used = frame;
             self.cache_hits += 1;
-            return cached.clone();
+            return cached.layout.clone();
         }
 
         self.cache_misses += 1;
@@ -486,11 +559,15 @@ impl TextSystem {
         let cost = rich.as_str().len()
             + rich.spans.len() * std::mem::size_of::<TextSpan>()
             + laid_out_bytes(&laid_out);
-        if self.layout_bytes + cost > LAYOUT_CACHE_BUDGET {
-            self.clear_layout_caches();
-        }
         self.layout_bytes += cost;
-        self.rich_cache.insert(key, laid_out.clone());
+        self.rich_cache.insert(
+            key,
+            CacheEntry {
+                layout: laid_out.clone(),
+                cost,
+                last_used: frame,
+            },
+        );
         laid_out
     }
 
@@ -1002,6 +1079,138 @@ mod tests {
         text.fonts
             .resolve(&style.family, style.weight, style.style)
             .map(|_| text)
+    }
+
+    /// Enough distinct blocks that keeping them all is past the byte target.
+    ///
+    /// Counted from one block's measured cost rather than hard coded, so
+    /// raising the budget does not quietly turn these into tests of nothing.
+    /// The count is worked out on a throwaway system, because a cache that has
+    /// already been driven past its budget is the thing under test.
+    fn a_working_set_over_the_budget(text: &mut TextSystem) -> Vec<SharedString> {
+        let style = TextStyle::default();
+        let options = LayoutOptions::default();
+        let block = |index: usize| {
+            SharedString::from(format!(
+                "Conversation {index} about something or other, long enough to lay out"
+            ))
+        };
+
+        let mut probe = TextSystem::with_system_fonts();
+        probe.layout(&block(0), &style, &options);
+        let each = probe.layout_cache_bytes().max(1);
+        let count = LAYOUT_CACHE_BUDGET / each + 64;
+
+        let blocks: Vec<SharedString> = (0..count).map(block).collect();
+        for block in &blocks {
+            text.layout(block, &style, &options);
+        }
+        blocks
+    }
+
+    #[test]
+    fn a_screenful_larger_than_the_budget_still_hits_the_cache() {
+        // The bug this pins down: the budget used to be enforced from inside
+        // the insert, so a frame whose own text did not fit threw away entries
+        // it was about to ask for again. Every lookup then missed and the text
+        // was laid out from scratch over and over inside the one frame, which
+        // took a list that was merely long and made it unusable.
+        let Some(mut text) = with_fonts() else {
+            return;
+        };
+        let style = TextStyle::default();
+        let options = LayoutOptions::default();
+        let blocks = a_working_set_over_the_budget(&mut text);
+
+        // A frame that asks for all of it, then the boundary, then the same
+        // frame again. The second pass must be free.
+        text.trim_caches();
+        for block in &blocks {
+            text.layout(block, &style, &options);
+        }
+        text.trim_caches();
+
+        let (hits, misses) = text.layout_cache_stats();
+        for block in &blocks {
+            text.layout(block, &style, &options);
+        }
+        let (hits, misses) = (
+            text.layout_cache_stats().0 - hits,
+            text.layout_cache_stats().1 - misses,
+        );
+        assert_eq!(
+            misses, 0,
+            "{misses} of {} blocks were laid out again despite being on screen the whole time",
+            blocks.len()
+        );
+        assert_eq!(hits as usize, blocks.len());
+    }
+
+    #[test]
+    fn asking_for_the_same_block_twice_in_a_frame_lays_it_out_once() {
+        // Layout measures a block several times over while it settles on a
+        // width, so this is the case that made the old policy so expensive.
+        let Some(mut text) = with_fonts() else {
+            return;
+        };
+        let style = TextStyle::default();
+        let options = LayoutOptions::default();
+        let blocks = a_working_set_over_the_budget(&mut text);
+
+        let before = text.layout_cache_stats().1;
+        for _ in 0..4 {
+            for block in &blocks {
+                text.layout(block, &style, &options);
+            }
+        }
+        assert_eq!(
+            text.layout_cache_stats().1,
+            before,
+            "a block on screen was laid out again within the same frame"
+        );
+    }
+
+    #[test]
+    fn text_nothing_asked_for_is_dropped_at_the_frame_boundary() {
+        // The other half of the bargain. Keeping the current frame's work is
+        // only affordable because everything else goes.
+        let Some(mut text) = with_fonts() else {
+            return;
+        };
+        let style = TextStyle::default();
+        let options = LayoutOptions::default();
+        let blocks = a_working_set_over_the_budget(&mut text);
+        text.trim_caches();
+
+        // A frame that wants one block out of all of them.
+        text.layout(&blocks[0], &style, &options);
+        text.trim_caches();
+
+        assert_eq!(
+            text.cached_layouts(),
+            1,
+            "the cache kept blocks the last frame never asked for"
+        );
+        assert!(text.layout_cache_bytes() < LAYOUT_CACHE_BUDGET);
+    }
+
+    #[test]
+    fn a_cache_within_its_budget_is_left_alone() {
+        // Trimming is for a cache that has outgrown the target. Below it,
+        // nothing is dropped, however old.
+        let Some(mut text) = with_fonts() else {
+            return;
+        };
+        let style = TextStyle::default();
+        let options = LayoutOptions::default();
+        text.layout(&SharedString::from("kept"), &style, &options);
+        for _ in 0..10 {
+            text.trim_caches();
+        }
+        assert_eq!(text.cached_layouts(), 1);
+        let before = text.layout_cache_stats().1;
+        text.layout(&SharedString::from("kept"), &style, &options);
+        assert_eq!(text.layout_cache_stats().1, before, "an idle entry was dropped");
     }
 
     #[test]
