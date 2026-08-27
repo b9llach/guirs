@@ -57,6 +57,55 @@ struct VirtualRowsVariable {
     build: Box<dyn Fn(usize) -> AnyElement>,
 }
 
+/// Rows whose heights nobody knows in advance, measured as they are built.
+///
+/// The variable-height case where the caller cannot supply a table of tops,
+/// which is most of them: working out how tall a wrapped, styled, marked up
+/// message is means laying it out, and laying all of them out is the cost this
+/// is here to avoid. So the list measures the rows it builds and remembers
+/// them, and guesses at the ones it has not reached yet.
+struct VirtualRowsMeasured {
+    count: usize,
+    /// What an unmeasured row is assumed to be worth.
+    ///
+    /// Only ever wrong about rows nobody has looked at, and only until they
+    /// are looked at. It decides how wrong the scrollbar is in the meantime,
+    /// so a rough average of a real row is worth more than a round number.
+    estimate: Px,
+    build: Box<dyn Fn(usize) -> AnyElement>,
+}
+
+/// What a measured list remembers between frames.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct RowMetrics {
+    /// The height of each row that has been built at least once.
+    heights: Vec<Option<Px>>,
+    /// The row the window was resting on last frame, and where its top was.
+    ///
+    /// Replacing a guess with a measurement changes where every row after it
+    /// sits. For rows above the window that would slide the text under the
+    /// reader, so the offset is corrected by however much the anchor moved.
+    anchor: Option<(usize, f32)>,
+}
+
+impl RowMetrics {
+    /// The top of every row, and the height of the whole list.
+    ///
+    /// Measured where the row has been seen, guessed where it has not.
+    fn tops(&self, count: usize, estimate: Px) -> (Vec<Px>, Px) {
+        let mut tops = Vec::with_capacity(count);
+        let mut y = 0.0f32;
+        for index in 0..count {
+            tops.push(Px(y));
+            y += match self.heights.get(index).copied().flatten() {
+                Some(height) => height.0,
+                None => estimate.0,
+            };
+        }
+        (tops, Px(y))
+    }
+}
+
 /// How far past each edge of the viewport a variable list still builds.
 ///
 /// A pixel count rather than a row count, because the rows have no uniform
@@ -84,6 +133,10 @@ pub struct Div {
     on_dismiss: Option<DismissHandler>,
     virtual_rows: Option<VirtualRows>,
     virtual_rows_variable: Option<VirtualRowsVariable>,
+    virtual_rows_measured: Option<VirtualRowsMeasured>,
+    /// Set on the box a measured list builds its rows into, naming the list
+    /// whose table its children's heights belong in.
+    measure_rows_for: Option<(GlobalElementId, std::ops::Range<usize>)>,
     autofocus: bool,
     snap_target: bool,
     /// What a screen reader should call this, where the text inside it is not
@@ -127,6 +180,8 @@ impl Div {
             on_dismiss: None,
             virtual_rows: None,
             virtual_rows_variable: None,
+            virtual_rows_measured: None,
+            measure_rows_for: None,
             autofocus: false,
             snap_target: false,
             access_label: None,
@@ -584,6 +639,46 @@ impl Div {
         self
     }
 
+    /// Fill this container with `count` rows, building and measuring only the
+    /// ones on screen.
+    ///
+    /// The case to reach for when the rows are not all the same height and
+    /// nothing knows how tall they are: a transcript of messages, a log of
+    /// wrapped lines, a feed. Working out the height of a wrapped, styled
+    /// block of text means laying it out, and laying every one of them out is
+    /// the cost being avoided, so instead each row is measured as it is built
+    /// and remembered. Rows nobody has scrolled to yet are worth `estimate`
+    /// until they are reached.
+    ///
+    /// The container has to scroll. Its content box is as tall as the whole
+    /// list, guesses included, so the scrollbar describes all `count` rows.
+    /// That makes the scrollbar approximate until the list has been read
+    /// through, which is the price of not laying out what nobody is looking
+    /// at. The rows themselves are always exact: a row is only ever drawn at a
+    /// measured height once it has been drawn once.
+    ///
+    /// ```
+    /// # use guirs_core::px;
+    /// # use guirs_ui::{div::div, element::IntoElement, widgets::scroll_view};
+    /// # let messages: Vec<String> = Vec::new();
+    /// scroll_view().virtual_rows_measured(messages.len(), px(80.0), move |index| {
+    ///     div().child(format!("message {index}")).into_any()
+    /// });
+    /// ```
+    pub fn virtual_rows_measured(
+        mut self,
+        count: usize,
+        estimate: impl Into<Px>,
+        build: impl Fn(usize) -> AnyElement + 'static,
+    ) -> Self {
+        self.virtual_rows_measured = Some(VirtualRowsMeasured {
+            count,
+            estimate: estimate.into(),
+            build: Box::new(build),
+        });
+        self
+    }
+
     /// Which rows to build this frame, from where the reader was last frame.
     ///
     /// `tops` is the y of each row's top within the content box, ascending. The
@@ -685,6 +780,105 @@ impl Div {
 
         self.children.clear();
         self.children.push(content.into_any());
+    }
+
+    /// Build the visible rows of a measured list, and say where they went.
+    ///
+    /// Positions come from what the last frame measured, so a row whose height
+    /// was still a guess moves once. Correcting a guess above the window would
+    /// slide everything under the reader, so the scroll offset moves with it
+    /// and the text stays where it was.
+    fn materialize_virtual_rows_measured(&mut self, cx: &mut Cx) {
+        let Some(rows) = self.virtual_rows_measured.take() else {
+            return;
+        };
+        let id = self.global_id;
+        let key = id.scoped("rows");
+        let mut metrics = cx.state.peek::<RowMetrics>(key).cloned().unwrap_or_default();
+        metrics.heights.resize(rows.count, None);
+
+        let (tops, total) = metrics.tops(rows.count, rows.estimate);
+        let mut scroll = cx.scroll_state(id);
+
+        // Hold the reader still. If the row the window was resting on has
+        // moved since last frame, everything above it grew or shrank by the
+        // same amount, so the offset moves by that much and nothing appears
+        // to jump.
+        if let Some((index, was)) = metrics.anchor {
+            if let Some(now) = tops.get(index) {
+                let drift = now.0 - was;
+                if drift.abs() > 0.01 {
+                    scroll.offset.y = Px((scroll.offset.y.0 + drift).max(0.0));
+                    cx.set_scroll_state(id, scroll);
+                }
+            }
+        }
+
+        let range = Div::visible_rows_variable(&tops, scroll);
+        metrics.anchor = tops.get(range.start).map(|top| (range.start, top.0));
+        cx.state.put(key, metrics);
+
+        let mut content = div()
+            .relative()
+            .w_full()
+            .h(total)
+            // Named so the rows can be found again to be measured.
+            .measure_rows_for(id, range.clone());
+        for index in range {
+            content = content.child(
+                div()
+                    .id(index as u64)
+                    .absolute()
+                    .top(tops[index])
+                    .left(Px::ZERO)
+                    .right(Px::ZERO)
+                    .child((rows.build)(index)),
+            );
+        }
+
+        self.children.clear();
+        self.children.push(content.into_any());
+    }
+
+    /// Mark this box as the one whose children are a measured list's rows.
+    fn measure_rows_for(mut self, list: GlobalElementId, range: std::ops::Range<usize>) -> Self {
+        self.measure_rows_for = Some((list, range));
+        self
+    }
+
+    /// Write down how tall the rows this box built turned out to be.
+    ///
+    /// Called from paint, because that is the first moment a height is known:
+    /// the whole point of the exercise is that nothing knew it beforehand.
+    fn record_row_heights(&self, cx: &mut Cx) {
+        let Some((list, range)) = &self.measure_rows_for else {
+            return;
+        };
+        let key = list.scoped("rows");
+        let mut metrics = cx.state.peek::<RowMetrics>(key).cloned().unwrap_or_default();
+        let mut changed = false;
+        for (slot, index) in range.clone().enumerate() {
+            let Some(node) = self.child_nodes.get(slot) else {
+                continue;
+            };
+            let height = cx.layout.bounds(*node).size.height;
+            if height <= Px::ZERO {
+                continue;
+            }
+            if metrics.heights.len() <= index {
+                metrics.heights.resize(index + 1, None);
+            }
+            if metrics.heights[index] != Some(height) {
+                metrics.heights[index] = Some(height);
+                changed = true;
+            }
+        }
+        if changed {
+            // A row turned out not to be the height it was drawn at, so the
+            // rows after it are in the wrong place until the next frame.
+            cx.request_animation();
+            cx.state.put(key, metrics);
+        }
     }
 
     /// The same, for rows that are not all the same height.
@@ -792,6 +986,7 @@ impl Element for Div {
         // decides how many children it has by looking at where the reader is.
         self.materialize_virtual_rows(cx);
         self.materialize_virtual_rows_variable(cx);
+        self.materialize_virtual_rows_measured(cx);
         // Added as a real child rather than drawn by hand, so it is laid out,
         // styled and clipped like everything else.
         self.materialize_tooltip(cx);
@@ -984,6 +1179,11 @@ impl Element for Div {
         // Recorded before the children paint, so an element that is itself
         // focused captures the contexts enclosing it including its own.
         cx.note_focus_path(self.global_id);
+
+        // Before the children paint, so a row that turns out to be a different
+        // height than it was drawn at is corrected on the next frame rather
+        // than a frame after that.
+        self.record_row_heights(cx);
 
         cx.begin_paint(self.global_id);
         for (child, node) in self.children.iter_mut().zip(self.child_nodes.iter()) {
@@ -1373,6 +1573,110 @@ mod tests {
             // matters is that it is a function of the viewport rather than of
             // the hundred thousand.
             assert!(nodes < 300, "laid out {nodes} nodes for a screenful");
+        }
+
+        /// Lay out the same tree repeatedly, as a running window would.
+        ///
+        /// A measured list is only right on the second frame: the first one has
+        /// nothing measured to go on, which is the whole point of it.
+        fn frames(build: impl Fn() -> Div, size: Size<Px>, count: usize) -> (Cx, usize) {
+            let mut cx = Cx::new(guirs_text::TextSystem::new(), StyleEngine::default());
+            let mut nodes = 0;
+            for f in 0..count {
+                let mut root = build();
+                cx.begin_frame(size, ScaleFactor(1.0), f as f64);
+                let node = root.request_layout(&mut cx);
+                cx.layout.compute(node, size, &mut cx.text);
+                root.paint(cx.layout.bounds(node), &mut cx);
+                nodes = cx.layout.node_count();
+                cx.end_frame();
+            }
+            (cx, nodes)
+        }
+
+        #[test]
+        fn a_measured_list_lays_out_a_window_rather_than_the_whole_list() {
+            // The point of the whole exercise. Ten thousand rows of unknown
+            // height must cost what a screenful costs, not what ten thousand
+            // rows cost.
+            let built = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+            let record = built.clone();
+            let (_, nodes) = frames(
+                move || {
+                    let record = record.clone();
+                    div()
+                        .w(Px(300.0))
+                        .h(Px(400.0))
+                        .overflow_y(Overflow::Scroll)
+                        .virtual_rows_measured(10_000, Px(40.0), move |index| {
+                            record.borrow_mut().push(index);
+                            div().h(Px(40.0)).into_any()
+                        })
+                },
+                Size::new(Px(300.0), Px(400.0)),
+                3,
+            );
+            let built = built.borrow();
+            assert!(!built.is_empty(), "the list built no rows at all");
+            assert!(
+                built.len() < 3 * 100,
+                "built {} rows over three frames of a screenful",
+                built.len()
+            );
+            assert!(nodes < 400, "laid out {nodes} nodes for a screenful");
+        }
+
+        #[test]
+        fn a_measured_row_is_remembered_rather_than_guessed_at_twice() {
+            // Rows twice as tall as the estimate. Once each has been built
+            // once the list has to size itself from what it measured, or every
+            // row after the first sits in the wrong place.
+            let size = Size::new(Px(300.0), Px(2000.0));
+            let mut cx = Cx::new(guirs_text::TextSystem::new(), StyleEngine::default());
+            let mut content = Px::ZERO;
+            for f in 0..3 {
+                let mut root = div()
+                    .w(Px(300.0))
+                    .h(Px(2000.0))
+                    .overflow_y(Overflow::Scroll)
+                    .virtual_rows_measured(50, Px(20.0), |_| div().h(Px(40.0)).into_any());
+                cx.begin_frame(size, ScaleFactor(1.0), f as f64);
+                let node = root.request_layout(&mut cx);
+                cx.layout.compute(node, size, &mut cx.text);
+                root.paint(cx.layout.bounds(node), &mut cx);
+                content = cx.scroll_state(root.global_id()).content.height;
+                cx.end_frame();
+            }
+            // Fifty rows of forty, not fifty of the twenty they were guessed
+            // at. The viewport is tall enough to hold them all, so every row
+            // has been measured by now.
+            assert_eq!(
+                content,
+                Px(2_000.0),
+                "the list is still sized from the guess rather than the measurement"
+            );
+        }
+
+        #[test]
+        fn an_empty_measured_list_builds_nothing() {
+            let built = std::rc::Rc::new(std::cell::RefCell::new(0usize));
+            let record = built.clone();
+            frames(
+                move || {
+                    let record = record.clone();
+                    div()
+                        .w(Px(300.0))
+                        .h(Px(400.0))
+                        .overflow_y(Overflow::Scroll)
+                        .virtual_rows_measured(0, Px(40.0), move |_| {
+                            *record.borrow_mut() += 1;
+                            div().into_any()
+                        })
+                },
+                Size::new(Px(300.0), Px(400.0)),
+                2,
+            );
+            assert_eq!(*built.borrow(), 0);
         }
 
         #[test]
