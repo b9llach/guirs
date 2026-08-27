@@ -66,12 +66,18 @@ struct VirtualRowsVariable {
 /// them, and guesses at the ones it has not reached yet.
 struct VirtualRowsMeasured {
     count: usize,
-    /// What an unmeasured row is assumed to be worth.
+    /// What a row nobody has looked at yet is assumed to be worth.
     ///
-    /// Only ever wrong about rows nobody has looked at, and only until they
-    /// are looked at. It decides how wrong the scrollbar is in the meantime,
-    /// so a rough average of a real row is worth more than a round number.
-    estimate: Px,
+    /// Asked per row rather than given once, because one number cannot fit a
+    /// list worth virtualizing. A transcript holds one line questions and
+    /// twenty line answers, and a single estimate is wrong about both. Since
+    /// the total is the sum of these, being wrong about them is what a reader
+    /// sees as a scrollbar that changes size while they scroll.
+    ///
+    /// The caller usually knows enough to guess well without laying anything
+    /// out: how long the text is, whether the row carries a picture. Only ever
+    /// consulted about rows that have not been built, and only until they are.
+    estimate: Box<dyn Fn(usize) -> Px>,
     build: Box<dyn Fn(usize) -> AnyElement>,
 }
 
@@ -80,6 +86,20 @@ struct VirtualRowsMeasured {
 pub(crate) struct RowMetrics {
     /// The height of each row that has been built at least once.
     heights: Vec<Option<Px>>,
+    /// What the measured rows really came to, and what they were guessed at.
+    ///
+    /// The ratio between the two is how wrong the estimate is, which is worth
+    /// knowing because it is mostly wrong in one direction: a guess that has
+    /// been ten per cent short on every row seen so far is probably ten per
+    /// cent short on the rest. Scaling by it makes the total stop moving after
+    /// a handful of rows instead of drifting the whole way down the list.
+    ///
+    /// Running tallies rather than something worked out from `heights`,
+    /// because they are wanted every frame and walking a list of a hundred
+    /// thousand rows to answer would cost more than virtualizing saves.
+    measured: f32,
+    guessed: f32,
+    seen: usize,
     /// The row the window was resting on last frame, and where its top was.
     ///
     /// Replacing a guess with a measurement changes where every row after it
@@ -89,17 +109,53 @@ pub(crate) struct RowMetrics {
 }
 
 impl RowMetrics {
+    /// How wrong the caller's estimate has been, as a factor to scale it by.
+    ///
+    /// One until enough rows have been seen to mean anything, and kept within
+    /// a sane range so that a few freak rows cannot send the scrollbar wild.
+    fn correction(&self) -> f32 {
+        // Four rows is enough to tell a systematic bias from one odd row, and
+        // few enough that it takes effect before the reader has gone far.
+        if self.seen < 4 || self.guessed <= 0.0 {
+            return 1.0;
+        }
+        (self.measured / self.guessed).clamp(0.25, 4.0)
+    }
+
+    /// Note that a row guessed at `guess` turned out to be `height` tall.
+    fn measure(&mut self, index: usize, guess: Px, height: Px) -> bool {
+        if self.heights.len() <= index {
+            self.heights.resize(index + 1, None);
+        }
+        if self.heights[index] == Some(height) {
+            return false;
+        }
+        // Counted once per row, the first time it is seen. A row measured
+        // again after the window was resized replaces its own contribution
+        // rather than being counted twice.
+        if let Some(old) = self.heights[index] {
+            self.measured += height.0 - old.0;
+        } else {
+            self.measured += height.0;
+            self.guessed += guess.0.max(0.0);
+            self.seen += 1;
+        }
+        self.heights[index] = Some(height);
+        true
+    }
+
     /// The top of every row, and the height of the whole list.
     ///
     /// Measured where the row has been seen, guessed where it has not.
-    fn tops(&self, count: usize, estimate: Px) -> (Vec<Px>, Px) {
+    fn tops(&self, count: usize, estimate: &dyn Fn(usize) -> Px) -> (Vec<Px>, Px) {
+        let correction = self.correction();
         let mut tops = Vec::with_capacity(count);
         let mut y = 0.0f32;
         for index in 0..count {
             tops.push(Px(y));
             y += match self.heights.get(index).copied().flatten() {
                 Some(height) => height.0,
-                None => estimate.0,
+                None => estimate(index).0.max(0.0) * correction,
             };
         }
         (tops, Px(y))
@@ -135,8 +191,10 @@ pub struct Div {
     virtual_rows_variable: Option<VirtualRowsVariable>,
     virtual_rows_measured: Option<VirtualRowsMeasured>,
     /// Set on the box a measured list builds its rows into, naming the list
-    /// whose table its children's heights belong in.
-    measure_rows_for: Option<(GlobalElementId, std::ops::Range<usize>)>,
+    /// whose table its children's heights belong in, which rows they are, and
+    /// what each was guessed at so the guess can be scored against what it
+    /// turns out to be.
+    measure_rows_for: Option<(GlobalElementId, std::ops::Range<usize>, Vec<Px>)>,
     autofocus: bool,
     snap_target: bool,
     /// What a screen reader should call this, where the text inside it is not
@@ -647,33 +705,43 @@ impl Div {
     /// wrapped lines, a feed. Working out the height of a wrapped, styled
     /// block of text means laying it out, and laying every one of them out is
     /// the cost being avoided, so instead each row is measured as it is built
-    /// and remembered. Rows nobody has scrolled to yet are worth `estimate`
-    /// until they are reached.
+    /// and remembered.
+    ///
+    /// `estimate` is asked what a row is worth until that row has been built.
+    /// It is asked per row rather than told once because the total is the sum
+    /// of its answers, and a list worth virtualizing rarely has rows of one
+    /// size: guess the same number for a one line question and a twenty line
+    /// answer and the total lurches every time a guess is replaced, which a
+    /// reader sees as a scrollbar that changes size while they scroll. The
+    /// caller usually knows enough to guess well without laying anything out,
+    /// such as how much text a row holds.
     ///
     /// The container has to scroll. Its content box is as tall as the whole
-    /// list, guesses included, so the scrollbar describes all `count` rows.
-    /// That makes the scrollbar approximate until the list has been read
-    /// through, which is the price of not laying out what nobody is looking
-    /// at. The rows themselves are always exact: a row is only ever drawn at a
-    /// measured height once it has been drawn once.
+    /// list, guesses included, so the scrollbar describes all `count` rows and
+    /// is only as accurate as the estimate until the list has been read
+    /// through. The rows themselves are always exact: a row is drawn at a
+    /// guessed height once and at its measured height ever after.
     ///
     /// ```
-    /// # use guirs_core::px;
+    /// # use guirs_core::{px, Px};
     /// # use guirs_ui::{div::div, element::IntoElement, widgets::scroll_view};
     /// # let messages: Vec<String> = Vec::new();
-    /// scroll_view().virtual_rows_measured(messages.len(), px(80.0), move |index| {
-    ///     div().child(format!("message {index}")).into_any()
-    /// });
+    /// # let lengths: Vec<usize> = messages.iter().map(|m| m.len()).collect();
+    /// scroll_view().virtual_rows_measured(
+    ///     messages.len(),
+    ///     move |index| Px(40.0 + (lengths[index] / 60) as f32 * 20.0),
+    ///     move |index| div().child(format!("message {index}")).into_any(),
+    /// );
     /// ```
     pub fn virtual_rows_measured(
         mut self,
         count: usize,
-        estimate: impl Into<Px>,
+        estimate: impl Fn(usize) -> Px + 'static,
         build: impl Fn(usize) -> AnyElement + 'static,
     ) -> Self {
         self.virtual_rows_measured = Some(VirtualRowsMeasured {
             count,
-            estimate: estimate.into(),
+            estimate: Box::new(estimate),
             build: Box::new(build),
         });
         self
@@ -759,7 +827,13 @@ impl Div {
         let mut content = div()
             .relative()
             .w_full()
-            .h(rows.row_height * rows.count as f32);
+            .h(rows.row_height * rows.count as f32)
+            // A flex item shrinks by default, and this one is deliberately
+            // taller than the box it sits in: its height is the whole list,
+            // which is what the scrollbar reads. Left to shrink it collapses
+            // to the height of the window and the list has no extent to
+            // scroll through.
+            .shrink(0.0);
         for index in range {
             content = content.child(
                 div()
@@ -797,7 +871,7 @@ impl Div {
         let mut metrics = cx.state.peek::<RowMetrics>(key).cloned().unwrap_or_default();
         metrics.heights.resize(rows.count, None);
 
-        let (tops, total) = metrics.tops(rows.count, rows.estimate);
+        let (tops, total) = metrics.tops(rows.count, rows.estimate.as_ref());
         let mut scroll = cx.scroll_state(id);
 
         // Hold the reader still. If the row the window was resting on has
@@ -809,12 +883,28 @@ impl Div {
                 let drift = now.0 - was;
                 if drift.abs() > 0.01 {
                     scroll.offset.y = Px((scroll.offset.y.0 + drift).max(0.0));
+                    // The extent moves with the offset, and has to. Whether
+                    // the reader has reached the end is decided in paint by
+                    // comparing this offset against this extent, so moving one
+                    // without the other answers that question wrongly: a
+                    // correction made above the window reads as the reader
+                    // having arrived at the bottom, and a list that sticks to
+                    // the bottom then jumps there. Scrolling up through a
+                    // transcript did exactly that, over and over.
+                    scroll.content.height = Px(scroll.content.height.0 + drift);
                     cx.set_scroll_state(id, scroll);
                 }
             }
         }
 
         let range = Div::visible_rows_variable(&tops, scroll);
+        // What each row about to be built was guessed at, so that once it has
+        // been measured the guess can be scored against the truth.
+        let correction = metrics.correction();
+        let guesses: Vec<Px> = range
+            .clone()
+            .map(|index| Px((rows.estimate)(index).0.max(0.0) * correction))
+            .collect();
         metrics.anchor = tops.get(range.start).map(|top| (range.start, top.0));
         cx.state.put(key, metrics);
 
@@ -822,8 +912,9 @@ impl Div {
             .relative()
             .w_full()
             .h(total)
+            .shrink(0.0)
             // Named so the rows can be found again to be measured.
-            .measure_rows_for(id, range.clone());
+            .measure_rows_for(id, range.clone(), guesses);
         for index in range {
             content = content.child(
                 div()
@@ -841,8 +932,13 @@ impl Div {
     }
 
     /// Mark this box as the one whose children are a measured list's rows.
-    fn measure_rows_for(mut self, list: GlobalElementId, range: std::ops::Range<usize>) -> Self {
-        self.measure_rows_for = Some((list, range));
+    fn measure_rows_for(
+        mut self,
+        list: GlobalElementId,
+        range: std::ops::Range<usize>,
+        guesses: Vec<Px>,
+    ) -> Self {
+        self.measure_rows_for = Some((list, range, guesses));
         self
     }
 
@@ -851,7 +947,7 @@ impl Div {
     /// Called from paint, because that is the first moment a height is known:
     /// the whole point of the exercise is that nothing knew it beforehand.
     fn record_row_heights(&self, cx: &mut Cx) {
-        let Some((list, range)) = &self.measure_rows_for else {
+        let Some((list, range, guesses)) = &self.measure_rows_for else {
             return;
         };
         let key = list.scoped("rows");
@@ -865,13 +961,8 @@ impl Div {
             if height <= Px::ZERO {
                 continue;
             }
-            if metrics.heights.len() <= index {
-                metrics.heights.resize(index + 1, None);
-            }
-            if metrics.heights[index] != Some(height) {
-                metrics.heights[index] = Some(height);
-                changed = true;
-            }
+            let guess = guesses.get(slot).copied().unwrap_or(height);
+            changed |= metrics.measure(index, guess, height);
         }
         if changed {
             // A row turned out not to be the height it was drawn at, so the
@@ -895,7 +986,11 @@ impl Div {
         let scroll = cx.scroll_state(self.global_id);
         let range = Div::visible_rows_variable(&rows.tops, scroll);
 
-        let mut content = div().relative().w_full().h(rows.total_height);
+        let mut content = div()
+            .relative()
+            .w_full()
+            .h(rows.total_height)
+            .shrink(0.0);
         for index in range {
             content = content.child(
                 div()
@@ -1608,7 +1703,7 @@ mod tests {
                         .w(Px(300.0))
                         .h(Px(400.0))
                         .overflow_y(Overflow::Scroll)
-                        .virtual_rows_measured(10_000, Px(40.0), move |index| {
+                        .virtual_rows_measured(10_000, |_| Px(40.0), move |index| {
                             record.borrow_mut().push(index);
                             div().h(Px(40.0)).into_any()
                         })
@@ -1639,7 +1734,7 @@ mod tests {
                     .w(Px(300.0))
                     .h(Px(2000.0))
                     .overflow_y(Overflow::Scroll)
-                    .virtual_rows_measured(50, Px(20.0), |_| div().h(Px(40.0)).into_any());
+                    .virtual_rows_measured(50, |_| Px(20.0), |_| div().h(Px(40.0)).into_any());
                 cx.begin_frame(size, ScaleFactor(1.0), f as f64);
                 let node = root.request_layout(&mut cx);
                 cx.layout.compute(node, size, &mut cx.text);
@@ -1657,6 +1752,74 @@ mod tests {
             );
         }
 
+        /// The extent a scroll view reports after `frames` frames, having been
+        /// scrolled to `offset` throughout.
+        fn extent_when_scrolled_to(offset: f32, frames: usize) -> Px {
+            let size = Size::new(Px(400.0), Px(500.0));
+            let mut cx = Cx::new(guirs_text::TextSystem::new(), StyleEngine::default());
+            let mut extent = Px::ZERO;
+            for f in 0..frames {
+                let mut root = div()
+                    .w(Px(400.0))
+                    .h(Px(500.0))
+                    .col()
+                    .overflow_y(Overflow::Scroll)
+                    .virtual_rows_measured(
+                        100,
+                        |_| Px(80.0),
+                        |_| div().h(Px(80.0)).into_any(),
+                    );
+                cx.begin_frame(size, ScaleFactor(1.0), f as f64);
+                let node = root.request_layout(&mut cx);
+                cx.layout.compute(node, size, &mut cx.text);
+                root.paint(cx.layout.bounds(node), &mut cx);
+                let id = root.global_id();
+                extent = cx.scroll_state(id).content.height;
+                cx.end_frame();
+                // Hold the reader at the same place every frame.
+                let mut scroll = cx.scroll_state(id);
+                scroll.offset.y = Px(offset);
+                cx.set_scroll_state(id, scroll);
+            }
+            extent
+        }
+
+        #[test]
+        fn the_scroll_extent_does_not_depend_on_which_rows_exist() {
+            // A hundred rows of eighty is eight thousand, wherever the reader
+            // happens to be standing. This is the bug that made scrolling up
+            // through a transcript feel broken: the extent was taken from how
+            // far the built rows reached, and only a screenful of them is ever
+            // built, so climbing the list shrank the list. The scrollbar grew
+            // under the reader as they scrolled.
+            let at_top = extent_when_scrolled_to(0.0, 3);
+            let in_the_middle = extent_when_scrolled_to(4_000.0, 3);
+            let at_the_end = extent_when_scrolled_to(7_500.0, 3);
+
+            assert_eq!(at_top, Px(8_000.0));
+            assert_eq!(
+                in_the_middle, at_top,
+                "the list shrank when the reader moved into the middle of it"
+            );
+            assert_eq!(
+                at_the_end, at_top,
+                "the list shrank when the reader moved to the end of it"
+            );
+        }
+
+        #[test]
+        fn a_tall_list_is_not_squeezed_into_its_window() {
+            // The content box is deliberately taller than what holds it, and a
+            // flex item shrinks by default. Left to shrink it collapses to the
+            // height of the window, and a list of any length has nothing to
+            // scroll through.
+            let extent = extent_when_scrolled_to(0.0, 2);
+            assert!(
+                extent > Px(500.0),
+                "the list was squeezed to fit its window: {extent:?}"
+            );
+        }
+
         #[test]
         fn an_empty_measured_list_builds_nothing() {
             let built = std::rc::Rc::new(std::cell::RefCell::new(0usize));
@@ -1668,7 +1831,7 @@ mod tests {
                         .w(Px(300.0))
                         .h(Px(400.0))
                         .overflow_y(Overflow::Scroll)
-                        .virtual_rows_measured(0, Px(40.0), move |_| {
+                        .virtual_rows_measured(0, |_| Px(40.0), move |_| {
                             *record.borrow_mut() += 1;
                             div().into_any()
                         })

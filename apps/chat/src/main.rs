@@ -333,11 +333,52 @@ fn thread(app: &Handles, markdown: MarkdownTheme) -> Div {
     let chat = app.chat.clone();
     let last = count.saturating_sub(1);
 
+    // Roughly how tall each message will turn out, worked out from how much
+    // text it holds. Only used for messages nobody has scrolled to yet, and
+    // only until they are reached, but the total is the sum of these, so a
+    // guess that treats a one line question like a twenty line answer makes
+    // the scrollbar change size as the reader scrolls. Counting lines costs
+    // nothing next to laying the message out.
+    let shapes: Vec<(bool, usize, usize)> = conversation
+        .messages
+        .iter()
+        .map(|message| {
+            let text = message.visible();
+            (
+                message.role == Role::You,
+                text.chars().count(),
+                // A blank line is a paragraph break, and each one puts a gap
+                // in the reply that a character count alone would miss.
+                text.matches("
+
+").count(),
+            )
+        })
+        .collect();
+
     scroll_view()
         .class("thread")
         .flex_1()
         .stick_to_bottom()
-        .virtual_rows_measured(count, px(TURN_ESTIMATE), move |index| {
+        .virtual_rows_measured(
+            count,
+            move |index| match shapes.get(index) {
+                Some((is_you, length, breaks)) => {
+                    let lines = (*length as f32 / CHARS_PER_LINE).ceil().max(1.0);
+                    // A reply carries a role label above it and a gap at every
+                    // paragraph break; what someone typed is a bubble and
+                    // nothing else.
+                    if *is_you {
+                        Px(TURN_CHROME_YOU + lines * LINE_HEIGHT)
+                    } else {
+                        Px(TURN_CHROME_REPLY
+                            + lines * LINE_HEIGHT
+                            + *breaks as f32 * PARAGRAPH_GAP)
+                    }
+                }
+                None => Px(TURN_CHROME_REPLY + LINE_HEIGHT),
+            },
+            move |index| {
             let chat = chat.read();
             let Some(message) = chat.current().messages.get(index) else {
                 return div().into_any();
@@ -355,15 +396,28 @@ fn thread(app: &Handles, markdown: MarkdownTheme) -> Div {
                         .child(turn(message, &markdown)),
                 )
                 .into_any()
-        })
+            },
+        )
 }
 
-/// What a message is assumed to be worth before anyone has looked at it.
+/// Roughly how many characters fit on a line of the transcript.
 ///
-/// Only ever wrong about messages nobody has scrolled to, and only until they
-/// are scrolled to. A rough average of a real turn keeps the scrollbar honest
-/// in the meantime.
-const TURN_ESTIMATE: f32 = 150.0;
+/// The transcript is capped at a readable width, so this barely moves with the
+/// window. Only ever used to guess at a message nobody has read yet.
+const CHARS_PER_LINE: f32 = 82.0;
+
+/// The height of one line of a message.
+const LINE_HEIGHT: f32 = 24.0;
+
+/// The gap a blank line puts between two paragraphs of a reply.
+const PARAGRAPH_GAP: f32 = 25.0;
+
+/// What surrounds the text of a reply: the role label above it, the padding
+/// around it, and the gap below.
+const TURN_CHROME_REPLY: f32 = 90.0;
+
+/// The same for something someone typed, which is a bubble and no label.
+const TURN_CHROME_YOU: f32 = 65.0;
 
 fn empty_state() -> Div {
     div()
