@@ -7,7 +7,7 @@
 //! The routing itself lives in `InputRouter`, which needs no GPU and is
 //! therefore testable.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use guirs_core::{GlobalElementId, Bounds, Point, Px, Rgba, ScaleFactor, Size};
 use guirs_render::{FrameOutcome, Renderer};
@@ -22,6 +22,42 @@ use crate::input::InputRouter;
 pub type RootFn = Box<dyn FnMut(&mut Cx) -> AnyElement>;
 
 /// A window and everything drawn in it.
+/// How long a window may go without drawing before its timings are stale.
+///
+/// Anything under this is a window drawing continuously, where smoothing is
+/// what makes the numbers readable. Anything over it is a window that was
+/// idle, where the last average describes a moment that has passed.
+const IDLE_GAP: Duration = Duration::from_millis(200);
+
+/// The most weight any one frame keeps once a burst of drawing is under way.
+///
+/// A tenth is what makes a steady number out of a jittery one.
+const SMOOTHING_FLOOR: f32 = 0.1;
+
+/// Average `new` into `old`, where `samples` counts the frames drawn since the
+/// window last woke up.
+///
+/// A plain exponential average is the wrong shape at the start of a burst. The
+/// frame that ends an idle spell is never typical: everything newly on screen
+/// is shaped and rasterized in it, so it can cost fifty times what the frames
+/// after it cost. Weighting it like any other sample leaves the number it
+/// produced sitting there for the next fifty frames, which on a window that
+/// draws on demand can be the rest of the session.
+///
+/// So the early frames of a burst are a running mean, which reaches the truth
+/// in a handful of frames, and only once there are enough of them to be steady
+/// does it settle into exponential smoothing.
+///
+/// Kept apart from the frame so the rule can be stated once and tested without
+/// a graphics device to hand.
+fn smooth(old: f32, new: f32, samples: u32) -> f32 {
+    if samples <= 1 || old == 0.0 {
+        return new;
+    }
+    let weight = (1.0 / samples as f32).max(SMOOTHING_FLOOR);
+    old * (1.0 - weight) + new * weight
+}
+
 pub struct Window {
     cx: Cx,
     renderer: Renderer,
@@ -35,6 +71,12 @@ pub struct Window {
     needs_redraw: bool,
     should_close: bool,
     last_frame_stats: guirs_render::SceneStats,
+    /// When the last frame finished, so the smoothed timings can tell a window
+    /// that is drawing slowly from one that has been sitting still.
+    last_frame_ended: Option<Instant>,
+    /// Frames drawn since the window last woke up, which is what decides how
+    /// much of the average any one of them is allowed to be.
+    frames_since_idle: u32,
 }
 
 impl Window {
@@ -50,6 +92,8 @@ impl Window {
             needs_redraw: true,
             should_close: false,
             last_frame_stats: Default::default(),
+            last_frame_ended: None,
+            frames_since_idle: 0,
         };
         window.refresh_background();
         window
@@ -150,6 +194,21 @@ impl Window {
         }
 
         let frame_started = Instant::now();
+        // A window that draws on demand can leave minutes between frames, and
+        // an average that keeps ten per cent of each old sample would still be
+        // reporting the frame before the pause. Worse, the frame that ends a
+        // pause is the expensive one: whatever has just come on screen has to
+        // be shaped and rasterized. Carrying that forward is how a window that
+        // spends a quarter of a millisecond drawing comes to report twelve.
+        let woke_up = self
+            .last_frame_ended
+            .is_none_or(|ended| frame_started.duration_since(ended) >= IDLE_GAP);
+        self.frames_since_idle = if woke_up {
+            1
+        } else {
+            self.frames_since_idle.saturating_add(1)
+        };
+        let samples = self.frames_since_idle;
         let now = self.start.elapsed().as_secs_f64();
         self.cx.begin_frame(size, self.renderer.scale_factor(), now);
         self.cx.scene.background = self.background;
@@ -187,7 +246,7 @@ impl Window {
         let outcome = self.renderer.render(&self.cx.scene, &mut self.cx.text);
         let render_ms = render_started.elapsed().as_secs_f32() * 1000.0;
 
-        let blend = |old: f32, new: f32| if old == 0.0 { new } else { old * 0.9 + new * 0.1 };
+        let blend = |old: f32, new: f32| smooth(old, new, samples);
         self.cx.build_ms = blend(self.cx.build_ms, build_ms);
         self.cx.layout_ms = blend(self.cx.layout_ms, layout_ms);
         self.cx.paint_ms = blend(self.cx.paint_ms, paint_ms);
@@ -202,16 +261,13 @@ impl Window {
 
         // Exponential smoothing, so the number is readable rather than jittery.
         let elapsed = frame_started.elapsed().as_secs_f32() * 1000.0;
-        self.cx.frame_ms = if self.cx.frame_ms == 0.0 {
-            elapsed
-        } else {
-            self.cx.frame_ms * 0.9 + elapsed * 0.1
-        };
+        self.cx.frame_ms = smooth(self.cx.frame_ms, elapsed, samples);
         self.cx.fps = if self.cx.frame_ms > 0.0 {
             1000.0 / self.cx.frame_ms
         } else {
             0.0
         };
+        self.last_frame_ended = Some(Instant::now());
 
         // Another frame is owed while anything is still transitioning, or if
         // the surface refused this one.
@@ -551,5 +607,64 @@ mod tests {
     fn a_bad_stylesheet_still_produces_an_engine() {
         let engine = engine_from_source("button { color: ###; } div { background: #123456; }");
         assert!(engine.rule_count() >= 1);
+    }
+
+    #[test]
+    fn the_first_frame_of_a_burst_is_the_whole_average() {
+        assert_eq!(smooth(0.0, 10.0, 1), 10.0);
+        // And an average of nothing is whatever arrived, however it is counted.
+        assert_eq!(smooth(0.0, 10.0, 50), 10.0);
+    }
+
+    #[test]
+    fn a_burst_forgets_its_cold_first_frame_quickly() {
+        // The bug this pins down. A window that draws on demand renders a
+        // burst, sits still, then renders another. The frame that ends the
+        // pause shapes and rasterizes everything newly on screen, so it costs
+        // many times what the frames after it cost. Weighted like any other
+        // sample it took fifty frames to fade, which on a window that only
+        // draws when something happens can be the rest of the session: a
+        // window costing a quarter of a millisecond reported twelve.
+        let cold = 18.5;
+        let steady = 0.3;
+
+        let mut value = smooth(0.0, cold, 1);
+        for frame in 2..=5 {
+            value = smooth(value, steady, frame);
+        }
+        assert!(
+            value < 4.0,
+            "five frames in, the cold frame is still most of the number: {value}"
+        );
+
+        // A tenth of each old sample is what a plain exponential average keeps,
+        // and it is far too sluggish to have got there.
+        let mut exponential = cold;
+        for _ in 2..=5 {
+            exponential = exponential * 0.9 + steady * 0.1;
+        }
+        assert!(
+            exponential > 12.0,
+            "the comparison is not measuring what it claims: {exponential}"
+        );
+    }
+
+    #[test]
+    fn a_settled_burst_is_smooth_rather_than_jumpy() {
+        // Once there are enough frames to average, one expensive frame must
+        // not make the number leap: that is the whole reason for smoothing.
+        let steady = 1.0;
+        let mut value = steady;
+        let spiked = smooth(value, 20.0, 500);
+        assert!(
+            spiked < 4.0,
+            "one slow frame moved the average too far: {spiked}"
+        );
+
+        // And it still converges on a real change rather than ignoring it.
+        for frame in 2..300 {
+            value = smooth(value, 5.0, frame);
+        }
+        assert!((value - 5.0).abs() < 0.01, "the average never caught up: {value}");
     }
 }
