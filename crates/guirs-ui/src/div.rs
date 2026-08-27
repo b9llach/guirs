@@ -40,6 +40,30 @@ struct VirtualRows {
     build: Box<dyn Fn(usize) -> AnyElement>,
 }
 
+/// A scrolling list whose rows are a different height, built on demand.
+///
+/// The variable-height case of [`VirtualRows`]. The scroll extent cannot be
+/// computed from the count, because the rows are not the same height, so the
+/// caller measures them out of band and hands back the result: `total_height`,
+/// the full height of the list, and `tops`, the y of every row's top within
+/// the content box, ascending. A frame decides what to build before it knows
+/// how big anything is, so those come from a cache the caller keeps across
+/// frames, not from this pass.
+struct VirtualRowsVariable {
+    /// The full height of the list, for the content box and the scrollbar.
+    total_height: Px,
+    /// The y of the top of each row within the content box, ascending.
+    tops: Vec<Px>,
+    build: Box<dyn Fn(usize) -> AnyElement>,
+}
+
+/// How far past each edge of the viewport a variable list still builds.
+///
+/// A pixel count rather than a row count, because the rows have no uniform
+/// height to count in. Enough that a fast flick does not run out of built
+/// rows before the next frame corrects the offset.
+const OVERSCAN_PX: f32 = 240.0;
+
 /// A styled container.
 pub struct Div {
     element_type: SharedString,
@@ -59,6 +83,7 @@ pub struct Div {
     stick_to_bottom: bool,
     on_dismiss: Option<DismissHandler>,
     virtual_rows: Option<VirtualRows>,
+    virtual_rows_variable: Option<VirtualRowsVariable>,
     autofocus: bool,
     snap_target: bool,
     /// What a screen reader should call this, where the text inside it is not
@@ -101,6 +126,7 @@ impl Div {
             stick_to_bottom: false,
             on_dismiss: None,
             virtual_rows: None,
+            virtual_rows_variable: None,
             autofocus: false,
             snap_target: false,
             access_label: None,
@@ -520,6 +546,82 @@ impl Div {
         self
     }
 
+    /// Fill this container with `count` rows of varying height, building only
+    /// the ones on screen.
+    ///
+    /// The variable-height case of [`virtual_rows`](Self::virtual_rows). The
+    /// scroll extent cannot be computed from the count here, because the rows
+    /// are not the same height, so the caller measures them out of band and
+    /// hands back the result: `total`, the full height of the list, and `tops`,
+    /// the y of every row's top within the content box, ascending. These come
+    /// from a cache the caller keeps across frames, because a frame decides
+    /// what to build before it knows how big anything is.
+    ///
+    /// The container still has to scroll. The content box is sized to `total`
+    /// so the scrollbar, the scroll extent and `stick_to_bottom` all read the
+    /// whole list; only the rows on screen are built, and they are placed
+    /// absolutely at the y their table says, inside it.
+    ///
+    /// ```
+    /// # use guirs_core::px;
+    /// # use guirs_ui::{div::div, element::IntoElement, widgets::scroll_view};
+    /// # let tops = vec![px(0.0), px(60.0), px(220.0)];
+    /// scroll_view().virtual_rows_variable(px(300.0), &tops, move |index| {
+    ///     div().child(format!("entry {index}")).into_any()
+    /// });
+    /// ```
+    pub fn virtual_rows_variable(
+        mut self,
+        total: impl Into<Px>,
+        tops: &[Px],
+        build: impl Fn(usize) -> AnyElement + 'static,
+    ) -> Self {
+        self.virtual_rows_variable = Some(VirtualRowsVariable {
+            total_height: total.into(),
+            tops: tops.to_vec(),
+            build: Box::new(build),
+        });
+        self
+    }
+
+    /// Which rows to build this frame, from where the reader was last frame.
+    ///
+    /// `tops` is the y of each row's top within the content box, ascending. The
+    /// built range covers everything that could be on screen at `offset`, with
+    /// `OVERSCAN_PX` of margin either side, so a fast flick lands on built rows
+    /// rather than a gap until the next frame.
+    ///
+    /// Returned as a range so it can be tested without a frame around it.
+    fn visible_rows_variable(tops: &[Px], scroll: ScrollState) -> std::ops::Range<usize> {
+        if tops.is_empty() {
+            return 0..0;
+        }
+        let viewport = if scroll.viewport.height > Px::ZERO {
+            scroll.viewport.height
+        } else {
+            Px(1024.0)
+        };
+
+        let top = scroll.offset.y.0 - OVERSCAN_PX;
+        let bottom = scroll.offset.y.0 + viewport.0 + OVERSCAN_PX;
+
+        // Binary searches rather than scans. This runs every frame, and the
+        // whole point of the table is that it may describe a list far longer
+        // than anything that will be built from it, so walking it would put
+        // back the cost virtualizing is here to remove.
+
+        // The row the top of the window falls inside. Every row starting at or
+        // before `top` is a candidate, and the last of them is the one still
+        // on screen: its height is not known here, so it is found by being the
+        // row the next one has not yet displaced.
+        let start = tops.partition_point(|row| row.0 <= top).saturating_sub(1);
+        // Every row that starts before the bottom of the window is at least
+        // partly inside it. The first one that does not is the end.
+        let end = tops.partition_point(|row| row.0 < bottom);
+
+        start..end.max(start).min(tops.len())
+    }
+
     /// Which rows to build this frame, from where the reader was last frame.
     ///
     /// Returned as a range so it can be tested without a frame around it.
@@ -577,6 +679,41 @@ impl Div {
                     .left(Px::ZERO)
                     .right(Px::ZERO)
                     .h(rows.row_height)
+                    .child((rows.build)(index)),
+            );
+        }
+
+        self.children.clear();
+        self.children.push(content.into_any());
+    }
+
+    /// The same, for rows that are not all the same height.
+    ///
+    /// The box the rows sit in is as tall as the caller says the whole list
+    /// is, so the scrollbar and the scroll extent describe every row while
+    /// only the ones on screen exist. Each built row is placed at the y its
+    /// table gives and left to size itself, which is the difference from the
+    /// fixed height case: nothing here knows how tall a row is.
+    fn materialize_virtual_rows_variable(&mut self, cx: &Cx) {
+        let Some(rows) = self.virtual_rows_variable.take() else {
+            return;
+        };
+        let scroll = cx.scroll_state(self.global_id);
+        let range = Div::visible_rows_variable(&rows.tops, scroll);
+
+        let mut content = div().relative().w_full().h(rows.total_height);
+        for index in range {
+            content = content.child(
+                div()
+                    // Keyed by row rather than by slot, as above: which
+                    // children exist changes with every scroll, and hover and
+                    // transitions would otherwise stay put while the rows
+                    // moved underneath them.
+                    .id(index as u64)
+                    .absolute()
+                    .top(rows.tops[index])
+                    .left(Px::ZERO)
+                    .right(Px::ZERO)
                     .child((rows.build)(index)),
             );
         }
@@ -654,6 +791,7 @@ impl Element for Div {
         // Before the child count is fixed, because a virtualized container
         // decides how many children it has by looking at where the reader is.
         self.materialize_virtual_rows(cx);
+        self.materialize_virtual_rows_variable(cx);
         // Added as a real child rather than drawn by hand, so it is laid out,
         // styled and clipped like everything else.
         self.materialize_tooltip(cx);
@@ -1134,6 +1272,78 @@ mod tests {
             assert!(range.len() < 200);
         }
 
+        /// Rows a hundred pixels apart, which makes the arithmetic readable.
+        fn evenly_spaced(count: usize, step: f32) -> Vec<Px> {
+            (0..count).map(|i| Px(i as f32 * step)).collect()
+        }
+
+        #[test]
+        fn only_a_window_of_a_long_variable_list_is_built() {
+            let tops = evenly_spaced(100_000, 100.0);
+            let range = Div::visible_rows_variable(&tops, scrolled_to(0.0, 400.0));
+            assert_eq!(range.start, 0);
+            assert!(range.len() < 100, "built {} rows", range.len());
+        }
+
+        #[test]
+        fn a_row_straddling_the_top_edge_is_still_built() {
+            // The case that matters most and is easiest to get backwards. At
+            // an offset of 250 the window opens part way down row two, so row
+            // two has to be built even though it starts above the window.
+            // Getting this wrong builds an empty list rather than a wrong one.
+            let tops = evenly_spaced(1_000, 100.0);
+            let range = Div::visible_rows_variable(&tops, scrolled_to(250.0, 400.0));
+            assert!(!range.is_empty(), "nothing was built at all");
+            assert!(
+                range.contains(&2),
+                "the row under the top of the window was skipped: {range:?}"
+            );
+        }
+
+        #[test]
+        fn the_variable_window_follows_the_scroll_offset() {
+            let tops = evenly_spaced(1_000, 100.0);
+            let range = Div::visible_rows_variable(&tops, scrolled_to(10_000.0, 400.0));
+            // Row 100 starts at 10_000, the top of the viewport.
+            assert!(range.contains(&100));
+            assert!(range.contains(&103), "the foot of the window was not built");
+            assert!(!range.contains(&130), "far below the window was built");
+            assert!(!range.contains(&90), "far above the window was built");
+        }
+
+        #[test]
+        fn rows_of_differing_heights_are_all_reached() {
+            // Uneven on purpose: the whole point of this path is that the tops
+            // cannot be worked out from a count and a height.
+            let tops: Vec<Px> = [0.0f32, 20.0, 400.0, 410.0, 900.0, 2000.0]
+                .iter()
+                .map(|y| Px(*y))
+                .collect();
+            // A 400 tall window at the top, plus 240 of overscan, reaches
+            // 640. Rows starting at 0, 20, 400 and 410 are inside that; the
+            // one at 900 is not, however tall the row before it turned out to
+            // be.
+            let range = Div::visible_rows_variable(&tops, scrolled_to(0.0, 400.0));
+            for index in 0..4 {
+                assert!(range.contains(&index), "row {index} was not built: {range:?}");
+            }
+            assert!(!range.contains(&4), "a row well below the window was built");
+            assert!(!range.contains(&5));
+        }
+
+        #[test]
+        fn an_empty_variable_list_builds_nothing() {
+            assert!(Div::visible_rows_variable(&[], scrolled_to(0.0, 400.0)).is_empty());
+        }
+
+        #[test]
+        fn a_cold_variable_list_builds_a_screenful_rather_than_nothing() {
+            let tops = evenly_spaced(100_000, 100.0);
+            let range = Div::visible_rows_variable(&tops, ScrollState::default());
+            assert!(!range.is_empty(), "a cold list would have painted blank");
+            assert!(range.len() < 200);
+        }
+
         /// Lay out one tree and hand back the frame.
         fn frame(mut root: Div, size: Size<Px>) -> (Cx, usize) {
             let mut cx = Cx::new(guirs_text::TextSystem::new(), StyleEngine::default());
@@ -1163,6 +1373,61 @@ mod tests {
             // matters is that it is a function of the viewport rather than of
             // the hundred thousand.
             assert!(nodes < 300, "laid out {nodes} nodes for a screenful");
+        }
+
+        #[test]
+        fn a_variable_list_builds_its_visible_rows() {
+            // The wiring, not the arithmetic. Asking for variable rows used to
+            // record the request and then never act on it, so the container
+            // laid out nothing at all and the list simply did not appear.
+            let tops: Vec<Px> = (0..10_000).map(|i| Px(i as f32 * 30.0)).collect();
+            let built = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+            let record = built.clone();
+            let (_, nodes) = frame(
+                div()
+                    .w(Px(300.0))
+                    .h(Px(400.0))
+                    .overflow_y(Overflow::Scroll)
+                    .virtual_rows_variable(Px(300_000.0), &tops, move |index| {
+                        record.borrow_mut().push(index);
+                        div().h(Px(30.0)).into_any()
+                    }),
+                Size::new(Px(300.0), Px(400.0)),
+            );
+
+            let built = built.borrow();
+            assert!(!built.is_empty(), "the list built no rows at all");
+            assert!(
+                built.len() < 100,
+                "built {} rows for a screenful of ten thousand",
+                built.len()
+            );
+            assert!(built.contains(&0), "the first row was not built: {built:?}");
+            assert!(nodes < 400, "laid out {nodes} nodes for a screenful");
+        }
+
+        #[test]
+        fn a_variable_lists_scroll_extent_is_the_height_it_was_given() {
+            // Measured by the caller, because the rows are not built and so
+            // cannot be measured here. The scrollbar has to describe all of
+            // them regardless.
+            let tops: Vec<Px> = (0..1_000).map(|i| Px(i as f32 * 30.0)).collect();
+            let mut root = div()
+                .w(Px(300.0))
+                .h(Px(400.0))
+                .overflow_y(Overflow::Scroll)
+                .virtual_rows_variable(Px(30_000.0), &tops, |_| div().h(Px(30.0)).into_any());
+
+            let size = Size::new(Px(300.0), Px(400.0));
+            let mut cx = Cx::new(guirs_text::TextSystem::new(), StyleEngine::default());
+            cx.begin_frame(size, ScaleFactor(1.0), 0.0);
+            let node = root.request_layout(&mut cx);
+            cx.layout.compute(node, size, &mut cx.text);
+            root.paint(cx.layout.bounds(node), &mut cx);
+
+            let scroll = cx.scroll_state(root.global_id());
+            assert_eq!(scroll.content.height, Px(30_000.0));
+            cx.end_frame();
         }
 
         #[test]
