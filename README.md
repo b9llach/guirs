@@ -217,6 +217,27 @@ Only the rows on screen exist, plus a few either side. A hundred thousand rows
 lay out a few hundred boxes rather than a few hundred thousand, and the number
 is a function of the viewport rather than of the count.
 
+When the rows are not all the same height, `virtual_rows_measured` measures
+each one as it builds it and remembers the answer, so nothing has to work out
+in advance how tall a wrapped, styled, marked up block of text is:
+
+```rust
+scroll_view().virtual_rows_measured(messages.len(), px(150.0), move |index| {
+    message(index).into_any()
+})
+```
+
+Rows nobody has scrolled to are worth the estimate until they are reached,
+which makes the scrollbar approximate on a list that has never been read
+through. That is the price of not laying out what nobody is looking at. The
+rows themselves are always exact, and correcting a guess above the window moves
+the scroll offset with it so the text does not slide under the reader. The chat
+application's transcript is built this way: a hundred messages cost the same
+frame as ten.
+
+`virtual_rows_variable` is the same thing for a caller that already knows the
+offsets and would rather supply them than have them discovered.
+
 Which rows are visible is answered from the previous frame's scroll offset,
 because a frame decides what to build before it knows how big it is. The
 overscan margin covers the difference during a fast scroll.
@@ -1141,10 +1162,6 @@ one that does less:
 - **Animated images.** Nothing animates. A picture is one frame.
 - **Nested rounded clips.** The innermost one's corners are kept and the outer
   one's are left to the scissor, which squares them.
-- **Rows of different heights.** A virtualized list computes its scroll extent
-  from the row count, so every row has to be the same height. A list of mixed
-  heights would need measured offsets and an estimate for what has not been
-  measured yet.
 - **Dialogs drawn in the window.** The file and message dialogs are the
   platform's own, which is the right default and not always the right answer:
   an application wanting a sheet that matches its own chrome has to build one.
