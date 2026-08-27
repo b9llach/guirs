@@ -323,18 +323,47 @@ fn thread(app: &Handles, markdown: MarkdownTheme) -> Div {
             .child(empty_state());
     }
 
-    let turns: Vec<Div> = conversation
-        .messages
-        .iter()
-        .map(|message| turn(message, &markdown))
-        .collect();
+    // Built one screenful at a time rather than all at once. A frame costs
+    // what is on screen, not what the conversation has come to: laying out a
+    // message means wrapping and measuring every line of it, and doing that
+    // for a hundred of them every frame is what made a long conversation
+    // slow. The list measures each message as it builds it and remembers the
+    // answer, so nothing here has to work out how tall a message is.
+    let count = conversation.messages.len();
+    let chat = app.chat.clone();
+    let last = count.saturating_sub(1);
 
     scroll_view()
         .class("thread")
         .flex_1()
         .stick_to_bottom()
-        .child(div().class("thread-inner").col().children(turns))
+        .virtual_rows_measured(count, px(TURN_ESTIMATE), move |index| {
+            let chat = chat.read();
+            let Some(message) = chat.current().messages.get(index) else {
+                return div().into_any();
+            };
+            div()
+                .class("thread-row")
+                .class_if(index == 0, "first")
+                .class_if(index == last, "last")
+                .col()
+                .items_center()
+                .child(
+                    div()
+                        .class("thread-row-inner")
+                        .col()
+                        .child(turn(message, &markdown)),
+                )
+                .into_any()
+        })
 }
+
+/// What a message is assumed to be worth before anyone has looked at it.
+///
+/// Only ever wrong about messages nobody has scrolled to, and only until they
+/// are scrolled to. A rough average of a real turn keeps the scrollbar honest
+/// in the meantime.
+const TURN_ESTIMATE: f32 = 150.0;
 
 fn empty_state() -> Div {
     div()

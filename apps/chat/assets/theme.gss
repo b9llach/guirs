@@ -381,12 +381,25 @@ window-glyph { font-size: 10px; }
     align-items: center;
 }
 
-.thread-inner {
+/* One message in the transcript. The transcript is built a screenful at a
+   time, so what used to be one padded column with a gap between its children
+   is now carried by each row: the gap becomes the row's bottom padding, and
+   the width cap and centring move inside it. A row has to be a whole,
+   self contained height, because that height is what gets measured. */
+.thread-row {
+    width: 100%;
+    padding-left: 20px;
+    padding-right: 20px;
+    padding-bottom: 22px;
+}
+
+.thread-row.first { padding-top: 20px; }
+
+.thread-row.last { padding-bottom: 10px; }
+
+.thread-row-inner {
     width: 100%;
     max-width: 770px;
-    padding-top: 20px;
-    padding-bottom: 10px;
-    gap: 22px;
 }
 
 .turn { gap: 12px; }
